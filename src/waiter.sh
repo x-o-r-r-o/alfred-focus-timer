@@ -8,7 +8,10 @@
 # focus.js to complete the session it keeps watching, in case time was added at the last moment.
 id="$1"
 data="$2"
-cd "$(dirname "$0")" || exit 1
+# Absolute path, and cd again before each call: when the workflow is updated or synced while a
+# session runs, its folder is replaced at the same path and the old working directory is gone.
+dir="$(cd "$(dirname "$0")" && pwd)" || exit 1
+cd "$dir" || exit 1
 case "$id" in '' | *[!0-9a-f]*) exit 1 ;; esac
 run="$data/running"
 step="${FT_WAITER_STEP:-15}"
@@ -21,17 +24,17 @@ while :; do
   read -r rid rend <"$run" || exit 0
   [ "$rid" = "$id" ] || exit 0
   case "$rend" in '' | *[!0-9]*) exit 0 ;; esac
-  left=$((rend - $(date +%s)))
+  left=$((rend - $(/bin/date +%s)))
   if [ "$left" -le 0 ]; then
     # Keep watching afterwards: if time was added just as the session ended, "complete" does nothing
     # and the running file still names this session with a later end time.
     tries=$((tries + 1))
     [ "$tries" -gt 5 ] && exit 0
-    /usr/bin/osascript -l JavaScript ./focus.js complete "$id" >/dev/null 2>&1
+    cd "$dir" 2>/dev/null && /usr/bin/osascript -l JavaScript ./focus.js complete "$id" >/dev/null 2>&1
     left=1
   fi
   [ "$left" -gt "$step" ] && left="$step"
-  sleep "$left" &
+  /bin/sleep "$left" &
   sp=$!
   wait "$sp"
   sp=""
