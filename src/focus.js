@@ -970,8 +970,8 @@ const enc = encodeURIComponent;
 // would be refused anyway, and Alfred reruns the Script Filter on each keystroke.
 function call(ctx, method, path, body) {
   const q = cacheRead(ctx, "quota");
-  if (q && now() < q.t + q.v.wait && now() >= q.t) {
-    throw new ApiError(q.v.title, q.v.subtitle.replace(/Try again in .*$/, `Try again in ${fmtDur(Math.max(60, q.t + q.v.wait - now()))}.`), "quota", q.v.status);
+  if (q && q.v && typeof q.v.wait === "number" && now() < q.t + q.v.wait && now() >= q.t) {
+    throw new ApiError(String(q.v.title || `${ctx.prov.name} API limit reached`), String(q.v.subtitle || "").replace(/Try again in .*$/, `Try again in ${fmtDur(Math.max(60, q.t + q.v.wait - now()))}.`), "quota", q.v.status);
   }
   try {
     return checkResponse(ctx.prov, http(method, ctx.prov.base() + path, ctx.prov.headers(ctx.token), body), path.split("?")[0]);

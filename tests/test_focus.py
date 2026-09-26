@@ -1131,6 +1131,14 @@ class TogglTests(TrackBase):
         self.assertEqual(self.sf("track", now=T0 + 3600 + 1201)[0]["title"], "Nothing is being tracked")
         self.assertGreater(len(MOCK.requests), n)
 
+    def test_damaged_quota_file_is_ignored(self):
+        self.sf("track")
+        for text in ('{"t": %d, "v": {"wait": 600}}' % T0, '{"t": %d, "v": null}' % T0, '{"t": %d, "v": {"wait": "x"}}' % T0, "{oops"):
+            with open(os.path.join(self.cache, "toggl-quota.json"), "w") as f:
+                f.write(text)
+            it = self.sf("track", "abc", now=T0 + 1)
+            self.assertNotEqual(it[0]["title"], "Something went wrong", text)
+
     def test_session_end_does_not_wait_for_the_tracker(self):
         # The pomo Script Filter that notices the end must not block on Toggl (Alfred would kill it
         # when you type, and the entry would never be stopped).
