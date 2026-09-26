@@ -35,7 +35,25 @@ Raycast demand this workflow replaces (downloads, 2026-09-26):
 1. Script filter prototype for the main keyword
 2. Actions + modifiers, Universal Actions / File Actions where relevant
 3. Workflow Configuration, icons, error states (no network / missing dependency)
-4. README with screenshots, `build.sh` release, forum post, then Gallery submission when invited
+4. README with screenshots, `python3 tools/build.py --package` release, forum post, then Gallery submission when invited
+
+## Known limitations
+- Toggl Track's free plan allows 30 API requests per hour. Entries are cached for 5 minutes, projects and tags for a day, and the workflow stops sending requests until the quota resets; a quota reached elsewhere (another app) shows up the same way.
+- Clockify lists the 50 most recent entries; Toggl Track the last 14 days.
+- The session log (`sessions.jsonl` in the workflow's data folder) is kept forever for the stats and the best streak; it grows by about 150 bytes per session.
+- Cached entries are kept per workspace; switching between many workspaces leaves a small file per workspace in the cache folder.
+- A session that ended while the Mac was asleep or off is reported quietly and doesn't auto-start the next one.
+- A failed request in the Script Filter (offline, bad token, server error) is not retried for 15 seconds while typing; ↩ on the error tries again at once.
+
+## Verify in real Alfred
+- [ ] Notifications from the background timer (External Trigger → Post Notification) appear, including when Alfred is closed, and the sound plays.
+- [ ] `osascript` → Alfred `run trigger` doesn't raise an Automation permission prompt (or the prompt is understandable).
+- [ ] The token dialog (hidden input) comes to the front when started from Alfred, and Cancel does nothing.
+- [ ] A running session survives quitting Alfred and a sleep/wake cycle; after a reboot, it catches up the next time `pomo` opens.
+- [ ] The Shortcuts start/end hooks run a real Shortcut, and a wrong name produces the notification.
+- [ ] The live countdown (`rerun`) updates every second without flicker; typing while it runs is not slowed down.
+- [ ] Universal Action on selected text opens `track` with the text; ⌘↩ and ⌥↩ in `pomo` do what the subtitles say on every row.
+- [ ] Clockify regional endpoints (EU/UK/AU/USA) with a real account; Toggl Track 402 quota headers on a free plan.
 
 ## Release checklist (Alfred forum + Gallery)
 Sources: alfred.app/submit, alfred.app/submit/styleguide, alfred.app/submit/screenshots, alfredforum.com topics 23976 and 23388.
@@ -48,7 +66,7 @@ Sources: alfred.app/submit, alfred.app/submit/styleguide, alfred.app/submit/scre
 - [x] Settings in Workflow Configuration; the info.plist `readme` (About This Workflow) matches README.md
 - [x] Main icon ≥ 256×256 px
 - [x] No self-updater; never download or install software (no pip/brew/curl of binaries); dependencies declared for Alfred to handle
-- [x] Any compiled binary is Developer ID signed + notarised; never strip quarantine
+- [x] No compiled binaries (nothing to sign or notarise); never strip quarantine
 - [x] No hard-coded paths; `prefs.plist` is git-ignored; secrets stay in Keychain
 - [x] AI assistance disclosed in the README and the forum post
 - [ ] Version bumped in `src/info.plist`; `python3 tools/build.py --package`; GitHub release with the `.alfredworkflow` attached

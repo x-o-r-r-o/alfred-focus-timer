@@ -4,7 +4,7 @@ A Pomodoro timer with stats, plus Toggl Track and Clockify time tracking, in Alf
 
 ## Usage
 
-Start a focus session, a short break or a long break via the `pomo` keyword. While a session runs, the same keyword shows the time left and lets you pause, resume, stop, skip or add time. Type a length and an optional label to start a custom session, like `pomo 50 write report` or `pomo 1h30`. Type `short 10` or `long` to start a break.
+Start a focus session, a short break or a long break via the `pomo` keyword. While a session runs, the same keyword shows the time left and lets you pause, resume, stop, skip or add time. Type a length and an optional label to start a custom session, like `pomo 50 write report` or `pomo 1h30`. Type `short 10` or `long` to start a break, and `+10` to add ten minutes to the running session.
 
 ![A focus session running in Alfred](images/pomo.png)
 
@@ -16,7 +16,7 @@ A notification and a sound mark the end of each session, even if the Mac was asl
 
 ### Stats
 
-See today’s and this week’s Pomodoros, focused time, your daily goal and your streak via the `pomo stats` keyword.
+See today’s and this week’s Pomodoros, focused time, your daily goal and your streak by typing `stats` via the `pomo` keyword.
 
 ![Pomodoro stats](images/stats.png)
 
@@ -29,9 +29,11 @@ Choose Toggl Track or Clockify in the Workflow’s Configuration, then start a t
 * <kbd>↩</kbd> Start the timer, restart a recent entry, or stop the running timer.
 * <kbd>⌘</kbd><kbd>↩</kbd> Start the timer together with a Pomodoro focus session; the timer stops when the session ends.
 
-The first time, press <kbd>↩</kbd> to paste your API token. It is stored in your macOS Keychain. Type `track workspace` to change the workspace and `track token` to replace the token.
+The first time, press <kbd>↩</kbd> to paste your API token, or <kbd>⌘</kbd><kbd>↩</kbd> to open the page where you find it. It is stored in your macOS Keychain. Type `track workspace` to change the workspace and `track token` to replace the token.
 
 Alternatively, start a timer for the selected text via the Universal Action.
+
+![Tracking selected text with the Universal Action](images/ua.png)
 
 To track every focus session automatically, turn on Pomodoro tracking in the Workflow’s Configuration. The timer keeps running while a session is paused.
 

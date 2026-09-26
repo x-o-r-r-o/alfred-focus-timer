@@ -533,6 +533,40 @@ class PomodoroTests(Base):
                              cwd=SRC, env=e, capture_output=True, text=True, timeout=30).stdout
         self.assertIn("Focus started", out)
 
+    # --- final review regressions ---
+
+    def test_prototype_words_are_plain_labels(self):
+        for q in ("constructor", "__proto__", "toString", "hasOwnProperty 10"):
+            it = self.sf("pomo", q)
+            self.assertTrue(it[0]["title"].startswith("Start Focus"), (q, it[0]))
+        os.makedirs(self.data, exist_ok=True)
+        with open(os.path.join(self.data, "state.json"), "w") as f:
+            json.dump({"status": "idle", "next": "constructor", "count": 1}, f)
+        with open(os.path.join(self.data, "sessions.jsonl"), "w") as f:
+            f.write(json.dumps({"kind": "constructor", "end": T0, "focused": 60, "outcome": "completed"}) + "\n")
+        self.assertTrue(self.sf("pomo")[0]["title"].startswith("Start Focus"))
+        self.assertEqual(self.sf("pomo", "stats")[0]["title"], "Today: 0 pomodoros · 0 min focused")
+
+    def test_display_strings_are_cleaned(self):
+        label = "a\u202eb\u2066c\x07d"
+        self.start(label=label)
+        raw = self.run_js("pomo", "", now=T0 + 5)
+        self.assertNotIn("\u202e", raw)
+        self.assertNotIn("\\u0007", raw)
+        self.assertIn("abcd", json.loads(raw)["items"][0]["title"])
+
+    def test_every_status_row_has_the_documented_modifiers(self):
+        self.start()
+        for it in self.sf("pomo", now=T0 + 5)[:-1]:
+            self.assertEqual(self.arg(it, "cmd")["a"], "stop", it["title"])
+            self.assertEqual(self.arg(it, "alt")["a"], "skip", it["title"])
+
+    def test_reveal_is_not_performed_in_test_mode(self):
+        self.start()
+        self.act({"a": "stop", "id": self.state()["id"]}, T0 + 60)
+        self.act({"a": "reveal"})
+        self.assertTrue(any(e.startswith("open:-R ") for e in self.effects()), self.effects())
+
     def test_plus_without_a_session(self):
         it = self.sf("pomo", "+10")
         self.assertEqual([i["title"] for i in it], ["No session is running"])
@@ -952,7 +986,7 @@ class TogglTests(TrackBase):
         it = self.sf("track")
         self.assertEqual(it[0]["title"], "Toggl Track rejected the API token")  # /me: bad token
         MOCK.force = None
-        self.sf("track")
+        self.sf("track", now=T0 + 20)  # after the pause that follows a failed request
         MOCK.force = (403, {"message": "No access"})
         it = self.sf("track", now=T0 + 3600)  # stale entries, /me still cached
         self.assertEqual(it[0]["title"], "Toggl Track refused the request (403)")
@@ -1138,6 +1172,70 @@ class TogglTests(TrackBase):
                 f.write(text)
             it = self.sf("track", "abc", now=T0 + 1)
             self.assertNotEqual(it[0]["title"], "Something went wrong", text)
+
+    # --- final review regressions ---
+
+    def test_damaged_track_files(self):
+        self.sf("track")
+        entries = os.path.join(self.cache, "toggl-entries-11.json")
+        for text in ('{"t": %d, "v": null}' % T0, '{"t": %d, "v": {"a": 1}}' % T0, '{"t": %d, "v": [null, 3, {"id": 1}]}' % T0):
+            with open(entries, "w") as f:
+                f.write(text)
+            titles = [i["title"] for i in self.sf("track", now=T0 + 1)]
+            self.assertNotEqual(titles[0], "Something went wrong", text)
+        for name, text in (("toggl-me.json", '{"t": %d, "v": null}' % T0), ("toggl-projects-11.json", '{"t": %d, "v": [null]}' % T0),
+                           ("toggl-error.json", '{"t": %d, "v": null}' % T0)):
+            with open(os.path.join(self.cache, name), "w") as f:
+                f.write(text)
+            self.assertNotEqual(self.sf("track", "x @web", now=T0 + 2)[0]["title"], "Something went wrong", name)
+        for text in ("null", "[1]", '{"toggl": "x"}'):
+            with open(os.path.join(self.data, "track.json"), "w") as f:
+                f.write(text)
+            self.assertNotEqual(self.sf("track", now=T0 + 3)[0]["title"], "Something went wrong", text)
+
+    def test_hostile_entry_text_is_cleaned(self):
+        MOCK.toggl_entries[0]["description"] = "Bad \u202etxt\n\x00 \ud83d"
+        raw = self.run_js("track", "")
+        items = json.loads(raw)["items"]
+        for i in items:  # display strings only: arg keeps the real value, escaped by JSON.stringify
+            for text in (i["title"], i["subtitle"], i["text"]["copy"]):
+                self.assertFalse(re.search("[\u202e\x00\n\ud800-\udfff]", text), text)
+        self.assertEqual(items[1]["title"], "Bad txt  \ufffd")
+        self.assertEqual(self.arg(items[1])["description"], "Bad \u202etxt\n\x00 \ud83d")
+
+    def test_failed_requests_pause_while_typing(self):
+        shutil.rmtree(self.cache, ignore_errors=True)
+        MOCK.force = (500, "")
+        it = self.sf("track")
+        self.assertEqual(it[0]["title"], "Toggl Track is having problems (500)")
+        self.assertEqual(self.arg(it[0]), {"a": "track-refresh"})  # ↩ tries again
+        n = len(MOCK.requests)
+        for dt, q in ((1, "w"), (2, "wr"), (5, "wri")):
+            self.assertEqual(self.sf("track", q, now=T0 + dt)[0]["title"], "Toggl Track is having problems (500)")
+        self.assertEqual(len(MOCK.requests), n)
+        MOCK.force = None
+        self.assertEqual(self.sf("track", now=T0 + 16)[0]["title"], "Nothing is being tracked")
+
+    def test_manual_refresh_keeps_the_quota_block(self):
+        self.sf("track")
+        MOCK.force = (429, "", {"Retry-After": "600"})
+        self.sf("track", now=T0 + 3600)
+        n = len(MOCK.requests)
+        self.assertIn("Too many requests", self.act({"a": "track-refresh"}, T0 + 3601))
+        self.assertEqual(len(MOCK.requests), n)
+
+    def test_test_mode_never_reaches_real_services(self):
+        env = {"FT_TOGGL_URL": "", "FT_CLOCKIFY_URL": ""}
+        shutil.rmtree(self.cache, ignore_errors=True)
+        self.assertEqual(self.sf("track", **env)[0]["title"], "Can't reach Toggl Track")
+        self.assertEqual(self.sf("track", tracker="clockify", **env)[0]["title"], "Can't reach Clockify")
+        self.act({"a": "open", "url": "https://track.toggl.com/profile"})
+        self.assertIn("open:https://track.toggl.com/profile", self.effects())
+        # the real Keychain item is off limits without FT_KEYCHAIN_FILE
+        self.assertEqual(self.act({"a": "token-set"}, FT_KEYCHAIN_FILE="", FT_TOKEN_INPUT=TOGGL_TOKEN),
+                         "Test mode: the real Keychain item is off limits.")
+        self.assertEqual(self.act({"a": "token-set"}, FT_KEYCHAIN_FILE=""), "")  # no dialog either
+        self.assertIn("dialog:token", self.effects())
 
     def test_session_end_does_not_wait_for_the_tracker(self):
         # The pomo Script Filter that notices the end must not block on Toggl (Alfred would kill it

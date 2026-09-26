@@ -14,8 +14,15 @@ function env(name, fallback) {
   return v.isNil() ? fallback : v.js;
 }
 const FM = $.NSFileManager.defaultManager;
-const BUNDLE = env("alfred_workflow_bundleid", "io.github.x-o-r-r-o.focus-timer");
+const REAL_BUNDLE = "io.github.x-o-r-r-o.focus-timer";
+const BUNDLE = env("alfred_workflow_bundleid", REAL_BUNDLE);
 const ALFRED = "com.runningwithcrayons.Alfred";
+// Test mode (any test override is set): never reach real services, the real Keychain item, Alfred,
+// Finder or the browser, even if a test forgets one of the overrides.
+const TEST_MODE = ["FT_TEST_LOG", "FT_NOW", "FT_KEYCHAIN_FILE", "FT_KEYCHAIN_SERVICE", "FT_TOGGL_URL", "FT_CLOCKIFY_URL", "FT_TOKEN_INPUT"]
+  .some((k) => env(k, "") !== "");
+// Lookup tables keyed by user-controlled strings have no prototype ("constructor", "__proto__").
+const table = (o) => Object.assign(Object.create(null), o);
 
 // ---------- small helpers ----------
 
@@ -40,6 +47,15 @@ const oneLine = (s, max = 200) => {
   return chars.length > max ? chars.slice(0, max - 1).join("") + "…" : t;
 };
 const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+
+// Display strings: no control characters or bidi overrides, and no lone surrogates (Alfred rejects
+// the whole JSON if one slips through, for example from a Toggl description cut by another app).
+function clean(s) {
+  return String(s)
+    .replace(/[\t\n\r\v\f\u0085\u2028\u2029]/g, " ")
+    .replace(/[\u0000-\u001f\u007f-\u009f\u061c\u202a-\u202e\u2066-\u2069]/g, "")
+    .replace(/[\ud800-\udbff][\udc00-\udfff]|[\ud800-\udfff]/g, (m) => (m.length === 2 ? m : "\ufffd"));
+}
 
 function fmtClock(secs) {
   secs = Math.max(0, Math.round(secs));
@@ -226,10 +242,16 @@ function processCommand(pid) {
 
 // FT_TEST_LOG makes the test suite record side effects instead of performing them.
 function testLog(line) {
+  if (!TEST_MODE) return false;
   const f = env("FT_TEST_LOG", "");
-  if (!f) return false;
-  appendLine(f, line);
+  if (f) appendLine(f, line);
   return true;
+}
+
+// Open a URL or reveal a file (never in test mode).
+function openURL(args) {
+  if (testLog(`open:${args.join(" ")}`)) return;
+  exec("/usr/bin/open", args);
 }
 
 function alfredTrigger(trigger, argument) {
@@ -286,19 +308,31 @@ function item(title, subtitle, icon, action, extra = {}) {
 function mod(subtitle, action) {
   return action ? { subtitle, arg: JSON.stringify(action), valid: true } : { subtitle, arg: "", valid: false };
 }
+// Every display string is cleaned here; "arg" values are JSON built by JSON.stringify, which
+// escapes lone surrogates itself, and keep the real data.
+function cleanDeep(v, key) {
+  if (typeof v === "string") return key === "arg" ? v : clean(v);
+  if (Array.isArray(v)) return v.map((x) => cleanDeep(x));
+  if (v && typeof v === "object") {
+    const o = {};
+    for (const k of Object.keys(v)) o[k] = cleanDeep(v[k], k);
+    return o;
+  }
+  return v;
+}
 function output(items, extra = {}) {
-  return JSON.stringify(Object.assign({ skipknowledge: true, items }, extra));
+  return JSON.stringify(cleanDeep(Object.assign({ skipknowledge: true, items }, extra)));
 }
 
 // =====================================================================
 // Pomodoro
 // =====================================================================
 
-const KINDS = {
+const KINDS = table({
   focus: { name: "Focus", icon: "focus" },
   short: { name: "Short Break", icon: "short" },
   long: { name: "Long Break", icon: "long" },
-};
+});
 const MAX_SECS = 24 * 3600;
 const CYCLE_RESET = 3 * 3600; // the Pomodoro count restarts after 3 idle hours
 
@@ -738,9 +772,9 @@ function statusItems(s) {
     items.push(item(`Paused · ${k.name} · ${fmtClock(left)} left${label}`, `${bar}  ↩ Resume · ${pomo}${tracked}`, "pause", { a: "resume", id }, { mods }));
     items.push(item("Resume", `Ends at ${clockTime(now() + left)}`, "play", { a: "resume", id }, { mods }));
   }
-  items.push(item("Add 5 Minutes", `Type +10 to add another amount`, "plus", { a: "extend", id, secs: 300 }));
-  items.push(item("Stop", "End this session and log the time so far", "stop", { a: "stop", id }));
-  items.push(item(`Skip to ${skipName}`, `Start the ${skipName.toLowerCase()} now (${fmtDur(lengthOf(nextKind))})`, "skip", { a: "skip", id }));
+  items.push(item("Add 5 Minutes", `Type +10 to add another amount`, "plus", { a: "extend", id, secs: 300 }, { mods }));
+  items.push(item("Stop", "End this session and log the time so far", "stop", { a: "stop", id }, { mods }));
+  items.push(item(`Skip to ${skipName}`, `Start the ${skipName.toLowerCase()} now (${fmtDur(lengthOf(nextKind))})`, "skip", { a: "skip", id }, { mods }));
   return items;
 }
 
@@ -809,12 +843,12 @@ function pomoItems(query) {
   }
 
   // a break or explicit focus: "short", "long 20", "focus 50 label"
-  const kindWord = { short: "short", break: "short", long: "long", focus: "focus" }[word];
+  const kindWord = table({ short: "short", break: "short", long: "long", focus: "focus" })[word];
   if (kindWord) {
     const p = parseDuration(rest);
     const secs = p.secs || lengthOf(kindWord);
     if (p.secs !== null && (p.secs < 1 || p.secs > MAX_SECS)) items.push(item("Sessions can be up to 24 hours", "", "error"));
-    else items.push(startItem(s, kindWord, secs, kindWord === "focus" ? p.label : p.label, true));
+    else items.push(startItem(s, kindWord, secs, p.label, true));
     return output(items, { rerun });
   }
 
@@ -869,13 +903,14 @@ function http(method, url, headers, body) {
     lines.push('header = "Content-Type: application/json"');
     lines.push(`data-raw = ${q(JSON.stringify(body))}`);
   }
+  if (TEST_MODE && !/^http:\/\/(127\.0\.0\.1|localhost|\[::1\])[:/]/.test(url)) return { status: 0, curl: 7 };
   const r = exec("/usr/bin/curl", ["-K", "-"], lines.join("\n") + "\n");
   if (r.status !== 0) return { status: 0, curl: r.status };
   const i = r.out.lastIndexOf("\n");
   const status = parseInt(r.out.slice(i + 1), 10) || 0;
   let text = r.out.slice(0, i);
   // Header blocks (several with "100 Continue" or a proxy), each ending with an empty line.
-  const hdrs = {};
+  const hdrs = Object.create(null);
   while (/^HTTP\/\S+ \d/.test(text)) {
     const m = text.match(/\r?\n\r?\n/);
     const block = m ? text.slice(0, m.index) : text;
@@ -918,7 +953,7 @@ function checkResponse(prov, r, path) {
     const ra = parseInt(h["retry-after"], 10);
     throw new ApiError(`Too many requests to ${n}`, "Wait a minute and try again", "quota", 429, isFinite(ra) && ra > 0 ? Math.min(ra, 3600) : ERROR_BACKOFF);
   }
-  if (r.status >= 500) throw new ApiError(`${n} is having problems (${r.status})`, "Try again later", "api");
+  if (r.status >= 500) throw new ApiError(`${n} is having problems (${r.status})`, "Try again later", "api", r.status);
   let detail = "";
   if (r.json && typeof r.json === "object") detail = r.json.message || r.json.error || "";
   else if (typeof r.json === "string") detail = r.json;
@@ -928,11 +963,14 @@ function checkResponse(prov, r, path) {
 
 // Keychain: service = bundle id, account = provider. FT_KEYCHAIN_FILE (tests only) swaps in a file.
 const KC_SERVICE = env("FT_KEYCHAIN_SERVICE", BUNDLE);
+// In test mode the real item is off limits: use FT_KEYCHAIN_FILE or a throwaway FT_KEYCHAIN_SERVICE.
+const KC_BLOCKED = TEST_MODE && !env("FT_KEYCHAIN_FILE", "") && (KC_SERVICE === REAL_BUNDLE || KC_SERVICE === BUNDLE);
 const TOKEN_RE = /^[A-Za-z0-9._+\/=:-]{8,256}$/;
 
 function getToken(acct) {
   const f = env("FT_KEYCHAIN_FILE", "");
   if (f) return String(readJSON(f, {})[acct] || "");
+  if (KC_BLOCKED) return "";
   const r = exec("/usr/bin/security", ["find-generic-password", "-s", KC_SERVICE, "-a", acct, "-w"]);
   return r.status === 0 ? r.out.trim() : "";
 }
@@ -946,6 +984,7 @@ function setToken(acct, token) {
     writeJSON(f, all);
     return;
   }
+  if (KC_BLOCKED) throw new ApiError("Test mode: the real Keychain item is off limits", "", "token");
   // `security -i` reads the command from stdin, so the token is never a process argument.
   // Both values were validated above, so they cannot break out of the quotes.
   exec("/usr/bin/security", ["-i"], `add-generic-password -U -s "${KC_SERVICE}" -a "${acct}" -l "Focus Timer (${acct})" -w "${token}"\n`);
@@ -960,6 +999,7 @@ function deleteToken(acct) {
     writeJSON(f, all);
     return;
   }
+  if (KC_BLOCKED) return;
   exec("/usr/bin/security", ["delete-generic-password", "-s", KC_SERVICE, "-a", acct]);
 }
 
@@ -968,7 +1008,17 @@ const enc = encodeURIComponent;
 
 // While a rate limit or quota is in force, requests fail at once without going out: every one
 // would be refused anyway, and Alfred reruns the Script Filter on each keystroke.
+// A Script Filter whose GET request just failed (offline, bad token, server error) doesn't send
+// the same kind of request again for FAIL_WAIT seconds, so typing doesn't cost a request per key.
+const FAIL_WAIT = 15;
 function call(ctx, method, path, body) {
+  const gate = ctx.sf && method === "GET";
+  if (gate) {
+    const f = cacheRead(ctx, "fail");
+    if (f && f.v && typeof f.v === "object" && now() < f.t + FAIL_WAIT && now() >= f.t) {
+      throw new ApiError(String(f.v.title || `Can't reach ${ctx.prov.name}`), String(f.v.subtitle || ""), String(f.v.kind || "network"), Number(f.v.status) || 0);
+    }
+  }
   const q = cacheRead(ctx, "quota");
   if (q && q.v && typeof q.v.wait === "number" && now() < q.t + q.v.wait && now() >= q.t) {
     throw new ApiError(String(q.v.title || `${ctx.prov.name} API limit reached`), String(q.v.subtitle || "").replace(/Try again in .*$/, `Try again in ${fmtDur(Math.max(60, q.t + q.v.wait - now()))}.`), "quota", q.v.status);
@@ -977,6 +1027,7 @@ function call(ctx, method, path, body) {
     return checkResponse(ctx.prov, http(method, ctx.prov.base() + path, ctx.prov.headers(ctx.token), body), path.split("?")[0]);
   } catch (e) {
     if (e instanceof ApiError && e.kind === "quota" && e.retryIn) cacheWrite(ctx, "quota", { wait: e.retryIn, title: e.message, subtitle: e.subtitle, status: e.status });
+    else if (gate && e instanceof ApiError && e.kind !== "quota") cacheWrite(ctx, "fail", { title: e.message, subtitle: e.subtitle, kind: e.kind, status: e.status });
     throw e;
   }
 }
@@ -1040,13 +1091,13 @@ const Toggl = {
   },
 };
 
-const CLOCKIFY_REGIONS = {
+const CLOCKIFY_REGIONS = table({
   global: "https://api.clockify.me/api/v1",
   usa: "https://use2.clockify.me/api/v1",
   eu: "https://euc1.clockify.me/api/v1",
   uk: "https://euw2.clockify.me/api/v1",
   au: "https://apse2.clockify.me/api/v1",
-};
+});
 
 const Clockify = {
   key: "clockify",
@@ -1115,7 +1166,7 @@ const Clockify = {
   },
 };
 
-const PROVIDERS = { toggl: Toggl, clockify: Clockify };
+const PROVIDERS = table({ toggl: Toggl, clockify: Clockify });
 const provider = () => PROVIDERS[env("tracker", "none")] || null;
 
 const DAY = 86400;
@@ -1131,20 +1182,30 @@ function cacheRead(ctx, name) {
 function cacheWrite(ctx, name, v) {
   writeJSON(cachePath(ctx, name), { t: now(), v });
 }
-function cached(ctx, name, ttl, fetch) {
-  const c = cacheRead(ctx, name);
-  if (c && now() - c.t < ttl && now() >= c.t) return c.v;
-  const v = fetch();
-  cacheWrite(ctx, name, v);
-  return v;
+// Cached lists must be arrays of objects, anything else (a damaged file) is fetched again.
+const isObj = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+const validList = (v) => (Array.isArray(v) ? v.filter((x) => isObj(x) && x.id !== undefined && x.id !== null && typeof x.name === "string") : null);
+function validEntries(v) {
+  if (!Array.isArray(v)) return null;
+  return v.filter((e) => isObj(e) && typeof e.start === "number")
+    .map((e) => Object.assign({}, e, { tags: Array.isArray(e.tags) ? e.tags.map(String) : [], description: String(e.description || "") }));
 }
-function clearCache(prov) {
+function cached(ctx, name, ttl, fetch, check = validList) {
+  const c = cacheRead(ctx, name);
+  const v = c ? check(c.v) : null;
+  if (v && now() - c.t < ttl && now() >= c.t) return v;
+  const fresh = fetch();
+  cacheWrite(ctx, name, fresh);
+  return fresh;
+}
+// keepQuota: a manual refresh must not lift a quota block that is still in force.
+function clearCache(prov, keepQuota) {
   const dir = cacheDir();
   const files = FM.contentsOfDirectoryAtPathError(dir, $());
   if (files.isNil()) return;
   for (let i = 0; i < files.count; i++) {
     const f = files.objectAtIndex(i).js;
-    if (f.startsWith(`${prov.key}-`)) removeFile(`${dir}/${f}`);
+    if (f.startsWith(`${prov.key}-`) && !(keepQuota && f === `${prov.key}-quota.json`)) removeFile(`${dir}/${f}`);
   }
 }
 
@@ -1152,17 +1213,19 @@ const norm = (s) => String(s || "").toLowerCase().normalize("NFKD").replace(/[̀
 const slug = (name) => String(name).trim().replace(/\s+/g, "_");
 
 function trackSettings() {
-  return readJSON(`${dataDir()}/track.json`, {});
+  const v = readJSON(`${dataDir()}/track.json`, {});
+  return isObj(v) ? v : {};
 }
 
-function context(prov) {
+// sf: called from a Script Filter (failed GET requests are then paused for a moment, see call()).
+function context(prov, sf) {
   const token = getToken(prov.key);
   if (!token) throw new ApiError(`Set your ${prov.name} API token`, prov.tokenHelp, "token");
-  const ctx = { prov, token };
-  ctx.me = cached(ctx, "me", DAY, () => prov.me(ctx));
-  const sel = trackSettings()[prov.key] || {};
+  const ctx = { prov, token, sf: !!sf };
+  ctx.me = cached(ctx, "me", DAY, () => prov.me(ctx), (v) => (isObj(v) ? v : null));
+  const sel = isObj(trackSettings()[prov.key]) ? trackSettings()[prov.key] : {};
   ctx.ws = sel.ws || ctx.me.defaultWs;
-  ctx.wsName = sel.name || "";
+  ctx.wsName = typeof sel.name === "string" ? sel.name : "";
   return ctx;
 }
 
@@ -1177,7 +1240,7 @@ function fetchEntries(ctx) {
 
 // Entries from the cache; a stale cache is shown at once and refreshed in the background.
 function loadEntries(ctx) {
-  const c = cacheRead(ctx, entriesName(ctx));
+  const c = savedEntries(ctx);
   if (c && now() - c.t < ENTRY_TTL() && now() >= c.t) return { entries: c.v, age: now() - c.t };
   if (c && !flag("FT_NO_BACKGROUND")) {
     // After a failed refresh (offline, rate limit, quota) wait a while before trying again,
@@ -1212,22 +1275,28 @@ function trackRefresh() {
     ctx = context(prov);
     fetchEntries(ctx);
   } catch (e) {
-    if (ctx) cacheWrite(ctx, "error", { title: e.message, subtitle: e.subtitle || "", kind: e.kind || "api" });
+    if (ctx) cacheWrite(ctx, "error", { title: e.message, subtitle: e.subtitle || "", kind: e.kind || "api", status: e.status || 0 });
   } finally {
     removeFile(lock);
   }
   return "";
 }
 
+function savedEntries(ctx) {
+  const c = cacheRead(ctx, entriesName(ctx));
+  const v = c ? validEntries(c.v) : null;
+  return v ? { t: c.t, v } : null;
+}
+
 // Update the cached entries after starting or stopping, so the list is right without a request.
 function cacheAfterStart(ctx, entry) {
-  const c = cacheRead(ctx, entriesName(ctx));
+  const c = savedEntries(ctx);
   const list = (c ? c.v : []).map((e) => (e.running ? Object.assign({}, e, { running: false, stop: now() }) : e));
   list.unshift(entry);
   writeJSON(cachePath(ctx, entriesName(ctx)), { t: c ? c.t : now(), v: list.slice(0, 200) });
 }
 function cacheAfterStop(ctx, id) {
-  const c = cacheRead(ctx, entriesName(ctx));
+  const c = savedEntries(ctx);
   if (!c) return;
   const list = c.v.map((e) => (String(e.id) === String(id) ? Object.assign({}, e, { running: false, stop: now() }) : e));
   writeJSON(cachePath(ctx, entriesName(ctx)), { t: c.t, v: list });
@@ -1263,12 +1332,17 @@ function entryLine(e) {
   return [e.project ? `@ ${e.project}` : "", ...e.tags.map((t) => `#${t}`)].filter(Boolean).join(" · ");
 }
 
+// Offline or a server error: ↩ tries again at once (the Script Filter pauses failed requests).
+const retryable = (e) => e.kind === "network" || e.status >= 500;
+
 function errorItems(prov, e) {
   const items = [];
   if (e.kind === "auth" || e.kind === "token") {
     items.push(item(e.message, e.subtitle, "key", { a: "token-set" }, {
       mods: { cmd: mod(`Open the ${prov.name} page with your token`, { a: "open", url: prov.tokenURL }) },
     }));
+  } else if (retryable(e)) {
+    items.push(item(e.message, `${e.subtitle} · ↩ Try again`, "error", { a: "track-refresh" }));
   } else {
     items.push(item(e.message, e.subtitle, "error"));
   }
@@ -1295,7 +1369,7 @@ function trackItems(query) {
 
   let ctx;
   try {
-    ctx = context(prov);
+    ctx = context(prov, true);
   } catch (e) {
     if (!(e instanceof ApiError)) throw e;
     return output(errorItems(prov, e));
@@ -1325,22 +1399,27 @@ function trackItems(query) {
   } catch (e) {
     if (!(e instanceof ApiError)) throw e;
     items.push(...errorItems(prov, e));
-    const c = cacheRead(ctx, entriesName(ctx));
+    const c = savedEntries(ctx);
     if (!c) return output(items);
     entries = c.v;
     const pc = cacheRead(ctx, `projects-${ctx.ws}`);
-    projects = pc ? pc.v : [];
+    projects = (pc && validList(pc.v)) || [];
   }
   if (/(^|\s)#\S/.test(q)) {
     try {
       tags = cached(ctx, `tags-${ctx.ws}`, DAY, () => prov.tags(ctx));
     } catch (e) {
       const tc = cacheRead(ctx, `tags-${ctx.ws}`);
-      tags = tc ? tc.v : [];
+      tags = (tc && validList(tc.v)) || [];
     }
   }
   const bgError = cacheRead(ctx, "error");
-  if (bgError && !items.length) items.push(item(bgError.v.title, `Showing saved entries · ${bgError.v.subtitle}`, bgError.v.kind === "auth" ? "key" : "error", bgError.v.kind === "auth" ? { a: "token-set" } : null));
+  if (bgError && isObj(bgError.v) && !items.length) {
+    const be = bgError.v, auth = be.kind === "auth";
+    const retry = !auth && retryable({ kind: be.kind, status: Number(be.status) || 0 });
+    items.push(item(String(be.title || "Couldn't refresh"), `Showing saved entries · ${String(be.subtitle || "")}${retry ? " · ↩ Try again" : ""}`,
+      auth ? "key" : "error", auth ? { a: "token-set" } : retry ? { a: "track-refresh" } : null));
+  }
 
   const running = entries.find((e) => e.running);
   const nowT = now();
@@ -1479,7 +1558,7 @@ function trackAction(a) {
         clearCache(prov);
         return `Removed the ${prov.name} token.`;
       case "open":
-        if (a.url === prov.tokenURL) exec("/usr/bin/open", [a.url]);
+        if (a.url === prov.tokenURL) openURL([a.url]);
         return "";
       case "track-ws": {
         const all = trackSettings();
@@ -1489,7 +1568,7 @@ function trackAction(a) {
       }
       case "track-refresh": {
         const ctx = context(prov);
-        clearCache(prov);
+        clearCache(prov, true);
         ctx.me = cached(ctx, "me", DAY, () => prov.me(ctx));
         fetchEntries(ctx);
         cacheWrite(ctx, `projects-${ctx.ws}`, prov.projects(ctx));
@@ -1498,7 +1577,7 @@ function trackAction(a) {
       }
       case "track-stop": {
         const ctx = context(prov);
-        const cachedEntry = (cacheRead(ctx, entriesName(ctx)) || { v: [] }).v.find((e) => String(e.id) === String(a.id));
+        const cachedEntry = (savedEntries(ctx) || { v: [] }).v.find((e) => String(e.id) === String(a.id));
         const stopped = prov.stop(ctx, { id: a.id, ws: a.ws });
         cacheAfterStop(ctx, a.id);
         // A Pomodoro that started this entry no longer owns it.
@@ -1533,6 +1612,7 @@ function trackAction(a) {
 }
 
 function askToken(prov) {
+  if (testLog("dialog:token")) return "";
   const app = Application.currentApplication();
   app.includeStandardAdditions = true;
   try {
@@ -1601,7 +1681,7 @@ function action(arg) {
   if (!a || typeof a !== "object") return "";
   if (["start", "pause", "resume", "stop", "skip", "extend"].includes(a.a)) return pomoAction(a);
   if (a.a === "reveal") {
-    if (exists(logPath())) exec("/usr/bin/open", ["-R", logPath()]);
+    if (exists(logPath())) openURL(["-R", logPath()]);
     return "";
   }
   return trackAction(a);
@@ -1624,7 +1704,7 @@ function run(argv) {
     }
   } catch (e) {
     if (cmd === "pomo" || cmd === "track") return output([item("Something went wrong", oneLine(e.message, 150), "error")]);
-    return `Focus Timer: ${oneLine(e.message, 150)}`;
+    return clean(`Focus Timer: ${oneLine(e.message, 150)}`);
   }
   return "";
 }
