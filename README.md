@@ -22,7 +22,7 @@ See today’s and this week’s Pomodoros, focused time, your daily goal and you
 
 ### Time Tracking
 
-Choose Toggl Track or Clockify in the Workflow’s Configuration, then start a timer via the `track` keyword. Type what you’re working on, with an optional project and tags, like `track writing docs @website #writing`. Type `@` to pick a project. With an empty query, it shows the running timer and your recent entries.
+Choose Toggl Track or Clockify in the Workflow’s Configuration, then start a timer via the `track` keyword. Type what you’re working on, with an optional project and tags, like `track writing docs @website #writing`. Type `@` to pick a project. With an empty query, it shows the running timer, the time tracked today and your recent entries.
 
 ![Tracking time with Toggl Track](images/track.png)
 

@@ -255,11 +255,22 @@ function playSound() {
   if (exists(path)) spawnDetached(["/usr/bin/afplay", path]);
 }
 
+// Run a Shortcut in the background (name as argv, after "--" so a name starting with "-" isn't an
+// option). If it can't run, for example because no Shortcut has that name, say so in a notification.
 function runShortcut(name) {
   name = String(name || "").trim();
   if (!name) return;
-  if (testLog(`shortcut:${name}`)) return;
-  if (exists("/usr/bin/shortcuts")) spawnDetached(["/usr/bin/shortcuts", "run", name]);
+  const bin = env("FT_SHORTCUTS", ""); // tests only: a stand-in for /usr/bin/shortcuts
+  if (!bin && testLog(`shortcut:${name}`)) return;
+  const exe = bin || "/usr/bin/shortcuts";
+  if (!exists(exe)) return;
+  spawnDetached(["/bin/bash", "-c", '"$1" run -- "$2" || exec /usr/bin/osascript -l JavaScript "$3" shortcut-failed "$2"',
+    "shortcut", exe, name, `${FM.currentDirectoryPath.js}/focus.js`]);
+}
+
+function shortcutFailed(name) {
+  notify(`The Shortcut “${oneLine(name, 80)}” didn’t run. Check its name in the Workflow’s Configuration.`);
+  return "";
 }
 
 // ---------- Script Filter output ----------
@@ -332,10 +343,28 @@ const statePath = () => `${dataDir()}/state.json`;
 const runningPath = () => `${dataDir()}/running`;
 const logPath = () => `${dataDir()}/sessions.jsonl`;
 
+// A state file that is damaged or hand-edited (wrong types, missing fields) falls back to idle
+// instead of showing NaN or throwing, keeping whatever parts are still valid.
 function loadState() {
-  const s = readJSON(statePath(), null);
-  return Object.assign({ status: "idle", count: 0, next: "focus", lastDone: 0, id: null, pid: 0, track: null }, s && typeof s === "object" ? s : {});
+  const raw = readJSON(statePath(), null);
+  const s = Object.assign({ status: "idle", count: 0, next: "focus", lastDone: 0, id: null, pid: 0, track: null },
+    raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {});
+  const fin = (v) => typeof v === "number" && isFinite(v);
+  s.count = fin(s.count) && s.count >= 0 ? Math.floor(s.count) : 0;
+  if (!KINDS[s.next]) s.next = "focus";
+  if (!fin(s.lastDone)) s.lastDone = 0;
+  if (!fin(s.pid) || s.pid < 0) s.pid = 0;
+  if (s.track !== null && (typeof s.track !== "object" || !PROVIDERS_KEYS.includes(s.track.prov) || s.track.id === undefined)) s.track = null;
+  if (!["idle", "running", "paused", "done"].includes(s.status)) s.status = "idle";
+  if (isActive(s)) {
+    const ok = typeof s.id === "string" && /^[0-9a-f]{20}$/.test(s.id) && KINDS[s.kind] && fin(s.secs) && s.secs > 0 && fin(s.start) &&
+      (s.status === "running" ? fin(s.end) : fin(s.left) && s.left >= 0);
+    if (!ok) Object.assign(s, { status: "idle", id: null, pid: 0, end: null, left: null, track: null });
+  }
+  if (typeof s.label !== "string") s.label = "";
+  return s;
 }
+const PROVIDERS_KEYS = ["toggl", "clockify"];
 
 // The running file is written before state.json, so a run interrupted in between never leaves a
 // "running" state without it (the waiter would exit at once and the session would never end).
@@ -471,7 +500,10 @@ function completeLocked(s, fx) {
 // only happens once because it runs under the lock), and restart a missing waiter after a crash
 // or reboot. Caller holds the lock.
 function reconcile(s, fx) {
-  if (s.status !== "running") return;
+  if (s.status !== "running") {
+    if (exists(runningPath())) removeFile(runningPath()); // left over from a damaged state file
+    return;
+  }
   if (now() >= s.end) completeLocked(s, fx);
   else if (!waiterAlive(s)) {
     saveState(s); // restores the running file too
@@ -728,7 +760,13 @@ function pomoItems(query) {
     s = loadState();
     reconcile(s, fx);
   });
-  if (fx.msgs.length || fx.focusEnded) runEffects(fx, true);
+  if (fx.msgs.length || fx.focusEnded) {
+    // Alfred terminates a Script Filter when you type, so side effects that call Toggl or
+    // Clockify (and may take seconds) run in a separate process instead of delaying the results.
+    if (fx.trackStop || (fx.focusStarted && !fx.focusStarted.linked && flag("link_tracker") && provider())) {
+      spawnDetached(["/usr/bin/osascript", "-l", "JavaScript", `${FM.currentDirectoryPath.js}/focus.js`, "effects", JSON.stringify(fx)]);
+    } else runEffects(fx, true);
+  }
   const q = oneLine(query);
   const lower = q.toLowerCase();
   const active = isActive(s);
@@ -807,11 +845,12 @@ function pomoItems(query) {
 // =====================================================================
 
 class ApiError extends Error {
-  constructor(title, subtitle, kind, status) {
+  constructor(title, subtitle, kind, status, retryIn) {
     super(title);
     this.subtitle = subtitle || "";
     this.kind = kind || "api"; // api | auth | network | quota | token
     this.status = status || 0;
+    this.retryIn = retryIn || 0; // seconds to wait before the next request (quota)
   }
 }
 
@@ -823,6 +862,7 @@ function http(method, url, headers, body) {
     `url = ${q(url)}`, `request = ${q(method)}`, "silent", "show-error",
     `max-time = ${q(env("FT_HTTP_TIMEOUT", "12"))}`, 'connect-timeout = "6"',
     'write-out = "\\n%{http_code}"', 'user-agent = "AlfredFocusTimer/1.0"', 'header = "Accept: application/json"',
+    "include", // response headers first, for Toggl's quota headers
   ];
   for (const h of headers) lines.push(`header = ${q(h)}`);
   if (body !== undefined) {
@@ -833,14 +873,26 @@ function http(method, url, headers, body) {
   if (r.status !== 0) return { status: 0, curl: r.status };
   const i = r.out.lastIndexOf("\n");
   const status = parseInt(r.out.slice(i + 1), 10) || 0;
-  const text = r.out.slice(0, i);
+  let text = r.out.slice(0, i);
+  // Header blocks (several with "100 Continue" or a proxy), each ending with an empty line.
+  const hdrs = {};
+  while (/^HTTP\/\S+ \d/.test(text)) {
+    const m = text.match(/\r?\n\r?\n/);
+    const block = m ? text.slice(0, m.index) : text;
+    text = m ? text.slice(m.index + m[0].length) : "";
+    for (const k of Object.keys(hdrs)) delete hdrs[k];
+    for (const line of block.split(/\r?\n/).slice(1)) {
+      const c = line.indexOf(":");
+      if (c > 0) hdrs[line.slice(0, c).trim().toLowerCase()] = line.slice(c + 1).trim();
+    }
+  }
   let json = null;
   try {
     json = text ? JSON.parse(text) : null;
   } catch (e) {
     json = null;
   }
-  return { status, json, text };
+  return { status, json, text, headers: hdrs };
 }
 
 function checkResponse(prov, r, path) {
@@ -854,8 +906,18 @@ function checkResponse(prov, r, path) {
   // as a workspace where you can't create tags, so it isn't reported as a bad token.
   if (r.status === 401 || (r.status === 403 && /^\/(me|user)$/.test(path || ""))) throw new ApiError(`${n} rejected the API token`, "Press ↩ to set a new token", "auth", r.status);
   if (r.status === 403) throw new ApiError(`${n} refused the request (403)`, "Check your access to this workspace, or press ↩ to set a new token", "auth", r.status);
-  if (r.status === 402) throw new ApiError(`${n} API limit reached`, "Toggl limits API calls per hour on your plan. Try again later.", "quota");
-  if (r.status === 429) throw new ApiError(`Too many requests to ${n}`, "Wait a minute and try again", "quota");
+  // Toggl answers 402 when the hourly quota of your plan is used up (30 requests on the free plan),
+  // with the seconds until it resets in a header. A 402 without quota headers is a paid feature.
+  const h = r.headers || {};
+  const resets = parseInt(h["x-toggl-quota-resets-in"], 10);
+  if (r.status === 402 && (isFinite(resets) || h["x-toggl-quota-remaining"] !== undefined)) {
+    const wait = isFinite(resets) && resets > 0 ? Math.min(resets, 3600) : 600;
+    throw new ApiError(`${n} API limit reached`, `Your Toggl plan allows a set number of requests per hour. Try again in ${fmtDur(Math.max(60, wait))}.`, "quota", 402, wait);
+  }
+  if (r.status === 429) {
+    const ra = parseInt(h["retry-after"], 10);
+    throw new ApiError(`Too many requests to ${n}`, "Wait a minute and try again", "quota", 429, isFinite(ra) && ra > 0 ? Math.min(ra, 3600) : ERROR_BACKOFF);
+  }
   if (r.status >= 500) throw new ApiError(`${n} is having problems (${r.status})`, "Try again later", "api");
   let detail = "";
   if (r.json && typeof r.json === "object") detail = r.json.message || r.json.error || "";
@@ -904,8 +966,19 @@ function deleteToken(acct) {
 const qs = (o) => Object.entries(o).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&");
 const enc = encodeURIComponent;
 
+// While a rate limit or quota is in force, requests fail at once without going out: every one
+// would be refused anyway, and Alfred reruns the Script Filter on each keystroke.
 function call(ctx, method, path, body) {
-  return checkResponse(ctx.prov, http(method, ctx.prov.base() + path, ctx.prov.headers(ctx.token), body), path.split("?")[0]);
+  const q = cacheRead(ctx, "quota");
+  if (q && now() < q.t + q.v.wait && now() >= q.t) {
+    throw new ApiError(q.v.title, q.v.subtitle.replace(/Try again in .*$/, `Try again in ${fmtDur(Math.max(60, q.t + q.v.wait - now()))}.`), "quota", q.v.status);
+  }
+  try {
+    return checkResponse(ctx.prov, http(method, ctx.prov.base() + path, ctx.prov.headers(ctx.token), body), path.split("?")[0]);
+  } catch (e) {
+    if (e instanceof ApiError && e.kind === "quota" && e.retryIn) cacheWrite(ctx, "quota", { wait: e.retryIn, title: e.message, subtitle: e.subtitle, status: e.status });
+    throw e;
+  }
 }
 
 const Toggl = {
@@ -1292,8 +1365,16 @@ function trackItems(query) {
   }
 
   if (!q) {
-    if (running) items.push(runningItem());
-    else items.push(item("Nothing is being tracked", "Type what you're working on: writing docs @project #tag", "info"));
+    // Time tracked today in this workspace (entries that started today, the running one until now).
+    const today = dayKey(nowT);
+    const tracked = entries.reduce((sum, e) => (String(e.ws) === String(ctx.ws) && e.start && dayKey(e.start) === today
+      ? sum + Math.max(0, (e.running ? nowT : e.stop || e.start) - e.start) : sum), 0);
+    const todayNote = `Today: ${fmtDur(tracked)} tracked`;
+    if (running) {
+      const it = runningItem();
+      it.subtitle = it.subtitle.replace(" · ↩ Stop", ` · ${todayNote} · ↩ Stop`);
+      items.push(it);
+    } else items.push(item("Nothing is being tracked", `${todayNote} · Type what you're working on: writing docs @project #tag`, "info"));
     const seen = new Set();
     for (const e of entries) {
       if (e.running || String(e.ws) !== String(ctx.ws)) continue;
@@ -1536,6 +1617,10 @@ function run(argv) {
       case "action": return action(arg);
       case "complete": return complete(arg);
       case "track-refresh": return trackRefresh();
+      case "shortcut-failed": return shortcutFailed(arg);
+      case "effects":
+        runEffects(JSON.parse(arg), true);
+        return "";
     }
   } catch (e) {
     if (cmd === "pomo" || cmd === "track") return output([item("Something went wrong", oneLine(e.message, 150), "error")]);

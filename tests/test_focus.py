@@ -7,7 +7,7 @@ that still refers to its temporary data folder. Toggl and Clockify are replaced 
 HTTP server (FT_TOGGL_URL / FT_CLOCKIFY_URL) and the Keychain by a file (FT_KEYCHAIN_FILE), except
 one test that uses a throwaway Keychain item and deletes it.
 """
-import base64, json, os, plistlib, re, shutil, subprocess, sys, tempfile, threading, time, unittest
+import base64, json, os, plistlib, re, shutil, signal, subprocess, sys, tempfile, threading, time, unittest
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
@@ -28,7 +28,8 @@ def iso(t):
 class Mock:
     def reset(self):
         self.requests = []
-        self.force = None  # (status, body) returned for every request
+        self.force = None  # (status, body[, headers]) returned for every request
+        self.delay = 0  # seconds to wait before answering
         self.next_id = 1000
         self.toggl_entries = [
             {"id": 1, "workspace_id": 11, "description": "Writing docs", "project_id": 101, "project_name": "Website Redesign",
@@ -59,9 +60,11 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
-    def send(self, status, body):
+    def send(self, status, body, headers=None):
         data = json.dumps(body).encode()
         self.send_response(status)
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
@@ -72,6 +75,8 @@ class Handler(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length") or 0)
         body = json.loads(self.rfile.read(n)) if n else None
         MOCK.requests.append({"method": method, "path": u.path, "query": parse_qs(u.query), "headers": dict(self.headers), "body": body})
+        if MOCK.delay:
+            time.sleep(MOCK.delay)
         if MOCK.force:
             return self.send(*MOCK.force)
         if u.path.startswith("/toggl/"):
@@ -205,9 +210,15 @@ class Base(unittest.TestCase):
                 self.env.pop(k, None)
 
     def tearDown(self):
-        subprocess.run(["pkill", "-f", self.tmp], capture_output=True)
+        # Detached helpers (effects, track-refresh, shortcut-failed) name the script by its full path
+        # rather than the temporary folder: give them a moment to finish, then make sure.
+        helpers = f"{SRC}/focus.js "
+        self.wait_for(lambda: subprocess.run(["pgrep", "-f", helpers], capture_output=True).returncode == 1, 10)
+        for pattern in (self.tmp, helpers):
+            subprocess.run(["pkill", "-f", pattern], capture_output=True)
         time.sleep(0.1)
         left = subprocess.run(["pgrep", "-fl", self.tmp], capture_output=True, text=True).stdout
+        left += subprocess.run(["pgrep", "-fl", helpers], capture_output=True, text=True).stdout
         shutil.rmtree(self.tmp, ignore_errors=True)
         self.assertEqual(left, "", "background processes left running")
 
@@ -532,6 +543,44 @@ class PomodoroTests(Base):
         os.utime(os.path.join(self.data, "lock"), (old, old))
         self.assertIn("started", self.start())
 
+    # --- audit pass 4 regressions ---
+
+    def test_damaged_state_falls_back_to_idle(self):
+        os.makedirs(self.data)
+        bad = ['{"status":"running"}', '{"status":"running","id":"abc","end":null}', '{"status":"running","id":"0123456789abcdef0123","end":"zz","secs":"q","kind":"focus","start":1}',
+               '{"status":"paused","id":"0123456789abcdef0123","left":"x","secs":100,"kind":"bogus","start":1}', '[1,2]', 'null', '"str"',
+               '{"status":"done","lastKind":"zzz","count":"7","next":"zz","track":5}', '{"status":"weird","count":-3,"lastDone":"x"}']
+        for text in bad:
+            with open(os.path.join(self.data, "state.json"), "w") as f:
+                f.write(text)
+            with open(os.path.join(self.data, "running"), "w") as f:
+                f.write("abc 1\n")
+            it = self.sf("pomo")
+            self.assertTrue(it[0]["title"].startswith("Start Focus"), (text, it[0]))
+            self.assertIn("Pomodoro 1 of 4", it[0]["subtitle"], text)
+            self.assertFalse(any("NaN" in i["title"] + i["subtitle"] for i in it), text)
+            self.assertEqual(self.sf("pomo", "+5")[0]["title"], "No session is running", text)
+            self.assertFalse(os.path.exists(os.path.join(self.data, "running")), text)
+            self.assertIn("Focus started", self.act({"a": "start", "kind": "focus", "secs": 60, "label": "", "expect": ""}), text)
+            self.assertEqual(self.state()["status"], "running")
+            os.remove(os.path.join(self.data, "state.json"))
+
+    def test_valid_paused_state_is_kept(self):
+        self.start()
+        sid = self.state()["id"]
+        self.act({"a": "pause", "id": sid}, T0 + 100)
+        self.assertEqual(self.sf("pomo", now=T0 + 200)[0]["title"], "Paused · Focus · 23:20 left")
+
+    def test_shortcut_that_cannot_run_is_reported(self):
+        fake = os.path.join(self.tmp, "shortcuts")
+        with open(fake, "w") as f:
+            f.write('#!/bin/bash\nprintf "%s\\n" "$@" > "$0.args"\nexit 1\n')
+        os.chmod(fake, 0o755)
+        self.start(shortcut_start="-Focus On", FT_SHORTCUTS=fake)
+        self.assertTrue(self.wait_for(lambda: any(f.startswith("trigger:notify:The Shortcut “-Focus On” didn’t run") for f in self.effects())), self.effects())
+        with open(fake + ".args") as f:
+            self.assertEqual(f.read().splitlines(), ["run", "--", "-Focus On"])  # a name, never an option
+
 
 class StatsTests(Base):
     extra_env = {"TZ": "America/New_York", "FT_FIRST_WEEKDAY": "2"}
@@ -580,6 +629,31 @@ class StatsTests(Base):
         self.assertEqual(self.arg(it[-1]), {"a": "reveal"})
         self.assertEqual(self.sf("pomo", "stats", now=self.local(2026, 9, 23, 18), daily_goal="2")[0]["subtitle"].split("  ")[1], "Daily goal reached")
 
+    def test_streak_across_months_and_years(self):
+        days = [(2026, 12, 30), (2026, 12, 31), (2027, 1, 1), (2027, 1, 2), (2027, 2, 27), (2027, 2, 28), (2027, 3, 1)]
+        self.write_log([{"kind": "focus", "end": self.local(*d), "focused": 1500, "outcome": "completed"} for d in days])
+        it = self.sf("pomo", "stats", now=self.local(2027, 3, 1, 20))
+        self.assertEqual(it[2]["title"], "Streak: 3 days")
+        self.assertIn("Best streak: 4 days · 7 pomodoros in total", it[2]["subtitle"])
+        self.assertTrue(it[1]["subtitle"].startswith("This month: 1 pomodoro"))
+        it = self.sf("pomo", "stats", now=self.local(2027, 1, 2, 20))
+        self.assertEqual(it[2]["title"], "Streak: 4 days")
+        self.assertTrue(it[1]["title"].startswith("This week: 4 pomodoros"), it[1])  # Mon 2026-12-28 to Sat 2027-01-02
+        self.assertTrue(it[1]["subtitle"].startswith("This month: 2 pomodoros"), it[1])
+
+    def test_days_follow_the_current_time_zone(self):
+        # 23:30 in New York is 04:30 the next day in London (after flying, or changing the zone)
+        self.write_log([{"kind": "focus", "end": self.local(2026, 9, 22, 23) + 1800, "focused": 1500, "outcome": "completed"}])
+        now = self.local(2026, 9, 23, 12)
+        self.assertEqual(self.sf("pomo", "stats", now=now)[0]["title"], "Today: 0 pomodoros · 0 min focused")
+        self.assertEqual(self.sf("pomo", "stats", now=now, TZ="Europe/London")[0]["title"], "Today: 1 pomodoro · 25 min focused")
+        self.assertIn("at 04:30", self.sf("pomo", "stats", now=now, TZ="Europe/London")[3]["subtitle"].replace("\u202f", " ").replace("4:30 AM", "04:30"))
+
+    def test_first_weekday_saturday(self):
+        # 2026-09-19 is a Saturday
+        self.write_log([{"kind": "focus", "end": self.local(2026, 9, d), "focused": 1500, "outcome": "completed"} for d in (18, 19, 23)])
+        self.assertTrue(self.sf("pomo", "stats", now=self.local(2026, 9, 23), FT_FIRST_WEEKDAY="7")[1]["title"].startswith("This week: 2 pomodoros"))
+
 
 class WaiterTests(Base):
     """Real background waiters with very short sessions (no injected clock)."""
@@ -589,6 +663,12 @@ class WaiterTests(Base):
         for k in ("FT_NO_WAITER", "FT_NOW"):
             self.env.pop(k)
         self.env["FT_WAITER_STEP"] = "1"
+
+    def waiter_on_record(self):
+        try:
+            return self.state().get("pid", 0) != 0
+        except (OSError, ValueError):
+            return False
 
     def waiters(self):
         return subprocess.run(["pgrep", "-f", f"waiter.sh .* {self.data}"], capture_output=True, text=True).stdout.split()
@@ -679,6 +759,75 @@ class WaiterTests(Base):
             other.kill()
             other.wait()
 
+    # --- audit pass 4 regressions ---
+
+    def test_waiter_survives_alfred_killing_the_script_filter(self):
+        # Alfred terminates a running Script Filter when you type. Kill the Script Filter's whole
+        # process group as soon as it has started a waiter (a session whose waiter died): the waiter
+        # must survive and fire. Whatever the moment of the kill, the session must never be lost.
+        killed_mid_run = 0
+        for n in range(4):
+            sid = f"{n:020x}"
+            end = int(time.time()) + 2
+            os.makedirs(self.data, exist_ok=True)
+            with open(os.path.join(self.data, "state.json"), "w") as f:
+                json.dump({"status": "running", "id": sid, "kind": "focus", "label": f"K{n}", "secs": 60, "start": end - 60, "end": end,
+                           "pid": 0, "count": 0, "next": "focus", "lastDone": 0}, f)
+            with open(os.path.join(self.data, "running"), "w") as f:
+                f.write(f"{sid} {end}\n")
+            p = subprocess.Popen(["/bin/bash", "-c", 'osascript -l JavaScript ./focus.js pomo "$1"', "sf", ""], cwd=SRC, env=self.env,
+                                 start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            while p.poll() is None and not self.waiter_on_record():
+                time.sleep(0.001)
+            try:
+                os.killpg(p.pid, signal.SIGKILL if n % 2 else signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                pass
+            p.wait()
+            killed_mid_run += p.returncode < 0
+            if not self.waiters():
+                self.sf("pomo")  # killed before it got that far: the next look starts the waiter
+            self.assertEqual(len(self.waiters()), 1)
+            self.assertTrue(self.wait_for(lambda: any(f"Focus complete: K{n}." in f for f in self.effects()), 8), self.effects())
+            self.assertTrue(self.wait_for(lambda: not self.waiters(), 5))
+        self.assertGreater(killed_mid_run, 0)
+        self.assertEqual(len(self.sessions()), 4)
+
+    def test_time_added_as_the_session_ends(self):
+        # The waiter read the old end time, then time was added before it asked focus.js to complete
+        # the session: it must keep watching and fire at the new end, not exit.
+        self.act({"a": "start", "kind": "focus", "secs": 60, "label": "Late add", "expect": ""})
+        subprocess.run(["pkill", "-f", f"waiter.sh .* {self.data}"])
+        s = self.state()
+        new_end = int(time.time()) + 3
+        s.update(end=new_end, secs=s["secs"] + 3, pid=0)
+        with open(os.path.join(self.data, "state.json"), "w") as f:
+            json.dump(s, f)
+        with open(os.path.join(self.data, "running"), "w") as f:
+            f.write(f"{s['id']} {int(time.time()) - 1}\n")  # what the waiter saw before the extension
+        w = subprocess.Popen(["/bin/bash", os.path.join(SRC, "waiter.sh"), s["id"], self.data], env=self.env)
+        time.sleep(1.5)
+        with open(os.path.join(self.data, "running"), "w") as f:
+            f.write(f"{s['id']} {new_end}\n")
+        self.assertIsNone(w.poll(), "the waiter gave up after a no-op completion")
+        self.assertTrue(self.wait_for(lambda: self.state()["status"] == "done", 8))
+        self.assertEqual(w.wait(timeout=5), 0)
+
+    def test_rapid_start_stop_skip_leaves_one_waiter(self):
+        for step in range(3):
+            self.start(secs=30, now=None)
+            sid = self.state()["id"]
+            self.act({"a": "skip", "id": sid})
+            sid = self.state()["id"]
+            self.act({"a": "pause", "id": sid})
+            self.act({"a": "resume", "id": sid})
+            self.act({"a": "extend", "id": sid, "secs": 60})
+            self.act({"a": "skip", "id": sid})
+            s = self.state()
+            self.assertEqual(self.waiters(), [str(s["pid"])])  # exactly one, and it is the one on record
+            self.act({"a": "stop", "id": s["id"]})
+            self.assertTrue(self.wait_for(lambda: not self.waiters(), 3))
+
 
 # ---------------------------------------------------------------- Time tracking
 
@@ -728,6 +877,7 @@ class TogglTests(TrackBase):
         it = data["items"]
         self.assertEqual(data["rerun"], 1)
         self.assertEqual(it[0]["title"], "▶ Café ☕️ planning · 1:02:05")
+        self.assertIn("Today: 2 h 2 min tracked", it[0]["subtitle"])  # 1 h earlier today + the running 1:02:05
         self.assertEqual(self.arg(it[0])["a"], "track-stop")
         self.assertEqual([i["title"] for i in it[1:3]], ["Writing docs", 'Emails ✉️ "urgent"'])  # duplicates merged
         self.assertIn("@ Website Redesign · #writing · 1 h", it[1]["subtitle"])
@@ -775,6 +925,10 @@ class TogglTests(TrackBase):
         self.act(a)
         self.assertEqual(MOCK.requests[-1]["body"]["tags"], ["Deep Work", "writing", "brand-new"])
         self.assertEqual(sum(r["path"].endswith("/tags") for r in MOCK.requests), 1)
+
+    def test_today_total_when_idle(self):
+        self.assertTrue(self.sf("track")[0]["subtitle"].startswith("Today: 1 h tracked · "))
+        self.assertTrue(self.sf("track", tracker="clockify")[0]["subtitle"].startswith("Today: 17 min tracked · "))
 
     def test_entries_without_start_are_skipped(self):
         MOCK.toggl_entries.append({"id": 50, "workspace_id": 11, "description": "Broken", "start": None, "stop": None, "duration": -1})
@@ -850,13 +1004,15 @@ class TogglTests(TrackBase):
         self.assertEqual(it[0]["title"], "Start @ Café Opening")
 
     def test_errors(self):
-        for status, body, title in [(401, "", "Toggl Track rejected the API token"), (402, "quota", "Toggl Track API limit reached"),
+        for status, body, title in [(401, "", "Toggl Track rejected the API token"), (402, "Requires a paid plan", "Toggl Track error 402"),
                                     (429, "", "Too many requests to Toggl Track"), (500, "", "Toggl Track is having problems (500)"),
                                     (400, "Invalid project_id", "Toggl Track error 400")]:
             MOCK.reset()
             shutil.rmtree(self.cache, ignore_errors=True)
             MOCK.force = (status, body)
             it = self.sf("track")
+            if status == 402:
+                self.assertEqual(it[0]["subtitle"], "Requires a paid plan")  # a paid feature, not the quota
             self.assertEqual(it[0]["title"], title)
             if status == 401:
                 self.assertEqual(self.arg(it[0]), {"a": "token-set"})
@@ -902,11 +1058,11 @@ class TogglTests(TrackBase):
         self.assertIn("shortcut:Focus On", self.effects())
         self.assertIn("Tracking in Toggl", self.sf("pomo", now=T0 + 5)[0]["subtitle"])
         n = len(self.paths("POST"))
-        # the focus session ends -> the entry is stopped
+        # the focus session ends -> the entry is stopped (by a separate process, see below)
         self.sf("pomo", now=T0 + 1500)
+        self.assertTrue(self.wait_for(lambda: any("Stopped the Toggl timer" in f for f in self.effects())), self.effects())
         self.assertEqual(self.paths("PATCH")[-1], f"/toggl/workspaces/11/time_entries/{s['track']['id']}/stop")
         self.assertEqual(len(self.paths("POST")), n)
-        self.assertTrue(any("Stopped the Toggl timer" in f for f in self.effects()))
 
     def test_stopping_entry_releases_pomodoro(self):
         self.act(self.arg(self.sf("track", "Deep dive")[0], "cmd"))
@@ -954,6 +1110,39 @@ class TogglTests(TrackBase):
         self.assertEqual([i["title"] for i in it], ["Replace the Toggl Track API token", "Remove the saved token"])
         self.assertIn("Removed", self.act(self.arg(it[1])))
         self.assertNotIn("toggl", self.keychain())
+
+    # --- audit pass 4 regressions ---
+
+    def test_quota_blocks_requests_until_it_resets(self):
+        self.sf("track")
+        MOCK.force = (402, "You have hit your hourly limit for API calls.", {"X-Toggl-Quota-Remaining": "0", "X-Toggl-Quota-Resets-In": "1200"})
+        it = self.sf("track", now=T0 + 3600)  # stale cache: refresh in the foreground (FT_NO_BACKGROUND)
+        self.assertEqual(it[0]["title"], "Toggl Track API limit reached")
+        self.assertIn("Try again in 20 min", it[0]["subtitle"])
+        self.assertIn("Writing docs", [i["title"] for i in it])
+        n = len(MOCK.requests)
+        for dt in (1, 5, 600):
+            it = self.sf("track", "some words", now=T0 + 3600 + dt)
+            self.assertEqual(it[0]["title"], "Toggl Track API limit reached")
+        self.assertIn("Try again in 10 min", it[0]["subtitle"])
+        self.assertIn("API limit", self.act({"a": "track-start", "description": "x", "tags": []}, T0 + 3700))
+        self.assertEqual(len(MOCK.requests), n)  # nothing went out while blocked
+        MOCK.force = None
+        self.assertEqual(self.sf("track", now=T0 + 3600 + 1201)[0]["title"], "Nothing is being tracked")
+        self.assertGreater(len(MOCK.requests), n)
+
+    def test_session_end_does_not_wait_for_the_tracker(self):
+        # The pomo Script Filter that notices the end must not block on Toggl (Alfred would kill it
+        # when you type, and the entry would never be stopped).
+        self.act(self.arg(self.sf("track", "Deep dive")[0], "cmd"))
+        tid = self.state()["track"]["id"]
+        MOCK.delay = 3
+        t = time.time()
+        it = self.sf("pomo", now=T0 + 1500)
+        self.assertLess(time.time() - t, 2)
+        self.assertTrue(it[0]["title"].startswith("Start Short Break"))
+        self.assertTrue(self.wait_for(lambda: f"/toggl/workspaces/11/time_entries/{tid}/stop" in self.paths("PATCH"), 10))
+        self.assertTrue(self.wait_for(lambda: any("Stopped the Toggl timer" in f for f in self.effects()), 5))
 
 
 class ClockifyTests(TrackBase):
@@ -1016,10 +1205,16 @@ class ClockifyTests(TrackBase):
 class KeychainTests(unittest.TestCase):
     """Uses a throwaway Keychain item under a test service name and always deletes it."""
 
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="focus-timer-test-")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
     def test_real_keychain_roundtrip(self):
         service = f"io.github.x-o-r-r-o.focus-timer.test-{os.getpid()}"
         env = dict(os.environ, FT_KEYCHAIN_SERVICE=service, tracker="toggl", FT_TOGGL_URL=BASE + "/toggl", FT_TOKEN_INPUT=TOGGL_TOKEN,
-                   alfred_workflow_data=tempfile.mkdtemp(), alfred_workflow_cache=tempfile.mkdtemp())
+                   alfred_workflow_data=self.tmp + "/d", alfred_workflow_cache=self.tmp + "/c")
         env.pop("FT_KEYCHAIN_FILE", None)
         try:
             out = subprocess.run(["osascript", "-l", "JavaScript", "./focus.js", "action", '{"a":"token-set"}'], cwd=SRC, env=env,
@@ -1033,6 +1228,37 @@ class KeychainTests(unittest.TestCase):
             self.assertNotEqual(gone.returncode, 0)
         finally:
             subprocess.run(["security", "delete-generic-password", "-s", service, "-a", "toggl"], capture_output=True)
+
+    def test_keychain_input_cannot_inject_commands(self):
+        service = f"io.github.x-o-r-r-o.focus-timer.test-{os.getpid()}-inj"
+        victim = service + "-victim"
+        env = dict(os.environ, FT_KEYCHAIN_SERVICE=service, tracker="clockify", FT_CLOCKIFY_URL=BASE + "/clockify",
+                   alfred_workflow_data=self.tmp + "/d", alfred_workflow_cache=self.tmp + "/c")
+        env.pop("FT_KEYCHAIN_FILE", None)
+
+        def token_set(tok, **extra):
+            return subprocess.run(["osascript", "-l", "JavaScript", "./focus.js", "action", '{"a":"token-set"}'], cwd=SRC,
+                                  env=dict(env, FT_TOKEN_INPUT=tok, **extra), capture_output=True, text=True, timeout=60).stdout
+
+        def exists(svc, acct):
+            return subprocess.run(["security", "find-generic-password", "-s", svc, "-a", acct], capture_output=True).returncode == 0
+        try:
+            evil = [f'abcdefgh" \nadd-generic-password -s "{victim}" -a x -w "pwned', 'abc def ghij', 'abcdefgh\\" -a other',
+                    "abcdefgh'quote", 'abcdefgh\\', 'a' * 300, "abcdefgh\tij"]
+            for tok in evil:
+                self.assertIn("doesn't look like", token_set(tok), tok)
+            self.assertFalse(exists(victim, "x"))
+            self.assertFalse(exists(service, "clockify"))
+            self.assertIn("doesn't look like", token_set("abcdefghij", FT_KEYCHAIN_SERVICE=f'{service}" -a y'))
+            # every character a real token may have survives the round trip
+            self.assertIn("Connected to Clockify", token_set(CLOCKIFY_TOKEN))
+            for tok in ("Ab+/=:._-09xyzXYZ", "ZmFrZS1rZXk+/w=="):
+                token_set(tok)
+                got = subprocess.run(["security", "find-generic-password", "-s", service, "-a", "clockify", "-w"], capture_output=True, text=True)
+                self.assertEqual(got.stdout.strip(), tok)
+        finally:
+            for svc, acct in ((service, "clockify"), (victim, "x"), (f'{service}" -a y', "clockify")):
+                subprocess.run(["security", "delete-generic-password", "-s", svc, "-a", acct], capture_output=True)
 
 
 class PlistTests(unittest.TestCase):
