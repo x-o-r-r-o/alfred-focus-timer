@@ -4,7 +4,7 @@ A Pomodoro timer with stats, plus Toggl Track and Clockify time tracking, in Alf
 
 ## Usage
 
-Start a focus session, a short break or a long break via the `pomo` keyword. While a session runs, the same keyword shows the time left and lets you pause, resume, stop, skip or add time. Type a length and an optional label to start a custom session, like `pomo 50 write report` or `pomo 1h30`. Type `short 10` or `long` to start a break, and `+10` to add ten minutes to the running session.
+Start a focus session, a short break or a long break via the `pomo` keyword. While a session runs, the same keyword shows the time left and lets you pause, resume, stop, skip or add time. Type a length and an optional label to start a custom session, like `pomo 50 write report` or `pomo 1h30`. Type `short 10` or `long` to start a break, and `+10` to add ten minutes to the running session. Your recent custom sessions, with a label or another length, are listed to start again, and typing part of a label finds them.
 
 ![A focus session running in Alfred](images/pomo.png)
 
@@ -31,9 +31,15 @@ Choose Toggl Track or Clockify in the Workflow’s Configuration, then start a t
 
 The first time, press <kbd>↩</kbd> to paste your API token, or <kbd>⌘</kbd><kbd>↩</kbd> to open the page where you find it. It is stored in your macOS Keychain. Type `track workspace` to change the workspace and `track token` to replace the token.
 
+See the time tracked today and this week, in total and by project, by typing `report` via the `track` keyword.
+
+![Time tracking report](images/report.png)
+
 Alternatively, start a timer for the selected text via the Universal Action.
 
 ![Tracking selected text with the Universal Action](images/ua.png)
+
+Timers started without an `@project` use the default project from the Workflow’s Configuration, if you set one.
 
 To track every focus session automatically, turn on Pomodoro tracking in the Workflow’s Configuration. The timer keeps running while a session is paused.
 

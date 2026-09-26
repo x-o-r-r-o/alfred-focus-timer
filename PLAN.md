@@ -24,6 +24,11 @@ Raycast demand this workflow replaces (downloads, 2026-09-26):
 - [x] Token in the Keychain via a hidden-input dialog (`security -i`, never in argv); 401/402/403/429/offline handled; cached with background refresh and back-off
 - [x] Link a pomodoro to a time-tracking entry automatically (config) or per entry (⌘↩)
 
+## Features (v1.1, round-4 audit)
+- [x] Recent custom focus sessions (label or non-default length) in the `pomo` menu; typing part of a label finds them (Raycast Pomodoro requests for several interval lengths, raycast/extensions#28699, #17949)
+- [x] `track report`: time tracked today and this week, in total and by project (Raycast Toggl Track request raycast/extensions#25258)
+- [x] Default project for new timers and Pomodoro tracking (Raycast Toggl Track request raycast/extensions#25076)
+
 ## Tech
 - **Stack:** bash + JXA; background timer via a `launchd`-free detached waiter (`src/waiter.sh`) + Alfred External Triggers for notifications.
 - **Dependencies:** None (API tokens for Toggl/Clockify in Keychain).
@@ -43,6 +48,8 @@ Raycast demand this workflow replaces (downloads, 2026-09-26):
 - The session log (`sessions.jsonl` in the workflow's data folder) is kept forever for the stats and the best streak; it grows by about 150 bytes per session.
 - Cached entries are kept per workspace; switching between many workspaces leaves a small file per workspace in the cache folder.
 - A session that ended while the Mac was asleep or off is reported quietly and doesn't auto-start the next one.
+- The background timer keeps the Workflow Configuration it was started with: a setting changed during a session (sound, auto-start, Shortcuts, Pomodoro tracking) applies from the next session.
+- `track report` counts the cached entries: Toggl Track's last 14 days (the whole week) but only Clockify's 50 most recent entries, which the report says when it hits that cap.
 - A failed request in the Script Filter (offline, bad token, server error) is not retried for 15 seconds while typing; ↩ on the error tries again at once.
 
 ## Verify in real Alfred
@@ -53,6 +60,7 @@ Raycast demand this workflow replaces (downloads, 2026-09-26):
 - [ ] The Shortcuts start/end hooks run a real Shortcut, and a wrong name produces the notification.
 - [ ] The live countdown (`rerun`) updates every second without flicker; typing while it runs is not slowed down.
 - [ ] Universal Action on selected text opens `track` with the text; ⌘↩ and ⌥↩ in `pomo` do what the subtitles say on every row.
+- [ ] Updating the workflow while a session runs: the session still ends with a notification (the waiter re-enters the replaced folder).
 - [ ] Clockify regional endpoints (EU/UK/AU/USA) with a real account; Toggl Track 402 quota headers on a free plan.
 
 ## Release checklist (Alfred forum + Gallery)
@@ -71,3 +79,13 @@ Sources: alfred.app/submit, alfred.app/submit/styleguide, alfred.app/submit/scre
 - [x] AI assistance disclosed in the README and the forum post
 - [ ] Version bumped in `src/info.plist`; `python3 tools/build.py --package`; GitHub release with the `.alfredworkflow` attached
 - [ ] Forum post in "Share your Workflows" with a screenshot, keywords, and the GitHub link
+
+## Ideas for v1.1
+Ranked by value for effort; not implemented in the round-4 audit.
+1. Pick up Workflow Configuration changes in a running session (read the current values from the workflow's `prefs.plist` when the waiter completes a session, falling back to the environment).
+2. `track report` for last week and per-day totals (Toggl Reports API or a wider time-entries window; Clockify paging beyond 50 entries).
+3. Choose the next session from the notification (Alfred 5.5 Text View or an "only show if populated" follow-up Script Filter) instead of `show_alfred`.
+4. Clockify tasks and Toggl tasks (`@project/task`), requested for the Raycast Clockify extension.
+5. Add a manual entry for past time (`track 1h meeting yesterday`), requested for Raycast Clockify (raycast/extensions#23844).
+6. Export the Pomodoro log as CSV from `pomo stats` (⌘↩ on the reveal row).
+7. A "pause tracking with the Pomodoro" option (stop the linked entry on pause, start a new one on resume).

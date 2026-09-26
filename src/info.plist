@@ -387,7 +387,7 @@
 	<key>readme</key>
 	<string>## Usage
 
-Start a focus session, a short break or a long break via the `pomo` keyword. While a session runs, the same keyword shows the time left and lets you pause, resume, stop, skip or add time. Type a length and an optional label to start a custom session, like `pomo 50 write report` or `pomo 1h30`. Type `short 10` or `long` to start a break, and `+10` to add ten minutes to the running session.
+Start a focus session, a short break or a long break via the `pomo` keyword. While a session runs, the same keyword shows the time left and lets you pause, resume, stop, skip or add time. Type a length and an optional label to start a custom session, like `pomo 50 write report` or `pomo 1h30`. Type `short 10` or `long` to start a break, and `+10` to add ten minutes to the running session. Your recent custom sessions, with a label or another length, are listed to start again, and typing part of a label finds them.
 
 * &lt;kbd&gt;↩&lt;/kbd&gt; Start the session, or pause and resume the running one.
 * &lt;kbd&gt;⌘&lt;/kbd&gt;&lt;kbd&gt;↩&lt;/kbd&gt; Stop the running session and log the time so far.
@@ -408,7 +408,11 @@ Choose Toggl Track or Clockify in the Workflow’s Configuration, then start a t
 
 The first time, press &lt;kbd&gt;↩&lt;/kbd&gt; to paste your API token, or &lt;kbd&gt;⌘&lt;/kbd&gt;&lt;kbd&gt;↩&lt;/kbd&gt; to open the page where you find it. It is stored in your macOS Keychain. Type `track workspace` to change the workspace and `track token` to replace the token.
 
+See the time tracked today and this week, in total and by project, by typing `report` via the `track` keyword.
+
 Alternatively, start a timer for the selected text via the Universal Action.
+
+Timers started without an `@project` use the default project from the Workflow’s Configuration, if you set one.
 
 To track every focus session automatically, turn on Pomodoro tracking in the Workflow’s Configuration. The timer keeps running while a session is paused.
 
@@ -879,6 +883,27 @@ Every keyword can be changed in the Workflow’s Configuration.
 			<string>popupbutton</string>
 			<key>variable</key>
 			<string>clockify_region</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string></string>
+				<key>placeholder</key>
+				<string>Project name</string>
+				<key>required</key>
+				<false/>
+				<key>trim</key>
+				<true/>
+			</dict>
+			<key>description</key>
+			<string>Used for new timers when you don't type an @project, including Pomodoro tracking</string>
+			<key>label</key>
+			<string>Default project</string>
+			<key>type</key>
+			<string>textfield</string>
+			<key>variable</key>
+			<string>default_project</string>
 		</dict>
 		<dict>
 			<key>config</key>
