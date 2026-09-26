@@ -12,7 +12,7 @@ Start a focus session, a short break or a long break via the `pomo` keyword. Whi
 * <kbd>⌘</kbd><kbd>↩</kbd> Stop the running session and log the time so far.
 * <kbd>⌥</kbd><kbd>↩</kbd> Skip to the next session.
 
-A notification and a sound mark the end of each session, even if the Mac was asleep in between. After four focus sessions the next break is a long one; the count starts again after three idle hours. Lengths, sound and automatic starts are set in the Workflow’s Configuration, which can also run a Shortcut when a focus session starts and ends, for example to turn a Focus mode on and off.
+A notification and a sound mark the end of each session, even if the Mac was asleep in between. After a restart, a running session catches up the next time you open Focus Timer. After four focus sessions the next break is a long one; the count starts again after three idle hours. Lengths, sound and automatic starts are set in the Workflow’s Configuration, which can also run a Shortcut when a focus session starts and ends, for example to turn a Focus mode on and off.
 
 ### Stats
 
@@ -33,7 +33,7 @@ The first time, press <kbd>↩</kbd> to paste your API token. It is stored in yo
 
 Alternatively, start a timer for the selected text via the Universal Action.
 
-To track every focus session automatically, turn on Pomodoro tracking in the Workflow’s Configuration.
+To track every focus session automatically, turn on Pomodoro tracking in the Workflow’s Configuration. The timer keeps running while a session is paused.
 
 Every keyword can be changed in the Workflow’s Configuration.
 

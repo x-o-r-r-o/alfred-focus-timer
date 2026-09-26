@@ -510,6 +510,22 @@ class PomodoroTests(Base):
         self.start(secs=7200)
         self.assertIn("stopped after 1 h.", self.act({"a": "stop", "id": self.state()["id"]}, T0 + 3570))
 
+    # --- audit pass 3 regressions ---
+
+    def test_lock_with_our_own_reused_pid_after_reboot(self):
+        # After a reboot, the PID in a leftover lock can be the very process asking for it.
+        # bash writes its PID and then execs osascript, which keeps that PID.
+        os.makedirs(os.path.join(self.data, "lock"))
+        arg = json.dumps({"a": "start", "kind": "focus", "secs": 60, "label": "", "expect": ""})
+        e = dict(self.env, FT_LOCK_TIMEOUT="1")
+        out = subprocess.run(["/bin/bash", "-c", 'echo $$ > "$0/lock/pid"; exec osascript -l JavaScript ./focus.js action "$1"', self.data, arg],
+                             cwd=SRC, env=e, capture_output=True, text=True, timeout=30).stdout
+        self.assertIn("Focus started", out)
+
+    def test_plus_without_a_session(self):
+        it = self.sf("pomo", "+10")
+        self.assertEqual([i["title"] for i in it], ["No session is running"])
+
     def test_stale_lock_is_recovered(self):
         os.makedirs(os.path.join(self.data, "lock"))
         old = time.time() - 60
@@ -766,6 +782,33 @@ class TogglTests(TrackBase):
         self.assertEqual(titles[0], "Nothing is being tracked")
         self.assertNotIn("Broken", titles)
 
+    def test_description_cannot_inject_curl_options(self):
+        desc = 'C:\\temp "quoted" \\" url = "http://evil.invalid/" header = "X-Evil: 1'
+        a = self.arg(self.sf("track", desc)[0])
+        self.act(a)
+        r = MOCK.requests[-1]
+        self.assertEqual(r["body"]["description"], desc)
+        self.assertEqual(r["path"], "/toggl/workspaces/11/time_entries")
+        self.assertNotIn("X-Evil", r["headers"])
+
+    def test_forbidden_is_not_a_bad_token(self):
+        self.sf("track")  # caches /me
+        MOCK.force = (403, {"message": "No access"})
+        shutil.rmtree(self.cache)
+        it = self.sf("track")
+        self.assertEqual(it[0]["title"], "Toggl Track rejected the API token")  # /me: bad token
+        MOCK.force = None
+        self.sf("track")
+        MOCK.force = (403, {"message": "No access"})
+        it = self.sf("track", now=T0 + 3600)  # stale entries, /me still cached
+        self.assertEqual(it[0]["title"], "Toggl Track refused the request (403)")
+        self.assertEqual(self.arg(it[0]), {"a": "token-set"})
+
+    def test_cmd_warns_about_replacing_a_pomodoro(self):
+        self.assertNotIn("replaces", self.sf("track", "Docs")[0]["mods"]["cmd"]["subtitle"])
+        self.start()
+        self.assertIn("replaces the running session", self.sf("track", "Docs")[0]["mods"]["cmd"]["subtitle"])
+
     def test_workspace_word_in_a_description(self):
         self.assertEqual(self.sf("track", "ws review")[0]["title"], "Start “ws review”")
 
@@ -952,6 +995,22 @@ class ClockifyTests(TrackBase):
     def test_auth_error(self):
         MOCK.force = (401, {"message": "Unauthorized"})
         self.assertEqual(self.sf("track")[0]["title"], "Clockify rejected the API token")
+
+    def test_no_permission_to_create_tags(self):
+        self.sf("track")
+        MOCK.force = None
+        orig = Handler.clockify
+
+        def no_tags(handler, method, path, body):
+            if method == "POST" and path.endswith("/tags"):
+                return handler.send(403, {"message": "Only admins can create tags"})
+            return orig(handler, method, path, body)
+        Handler.clockify = no_tags
+        try:
+            msg = self.act(self.arg(self.sf("track", "Standup #brand_new")[0]))
+        finally:
+            Handler.clockify = orig
+        self.assertEqual(msg, "Clockify refused the request (403). Check your access to this workspace, or press ↩ to set a new token")
 
 
 class KeychainTests(unittest.TestCase):

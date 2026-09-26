@@ -17,13 +17,15 @@ Raycast demand this workflow replaces (downloads, 2026-09-26):
 **Alfred today:** SandwichTimer, Timer (gallery), Toggl workflow from 2013, no Clockify.
 
 ## Features (v1.0)
-- [ ] `pomo` start 25/5 (configurable) cycles, notifications + sound, optional Focus mode on/off via Shortcuts
-- [ ] `pomo stats` today/week sessions log
-- [ ] `track <desc>` start/stop Toggl or Clockify timer, pick project, list recent entries
-- [ ] Link a pomodoro to a time-tracking entry automatically
+- [x] `pomo` start 25/5/15 (configurable) cycles, long break every N, custom lengths (`pomo 50`, `pomo 1h30`), labels, pause/resume/stop/skip/+time, notifications + sound, optional Focus mode on/off via Shortcuts, auto-start options
+- [x] Background waiter (wall-clock, sleep/wake safe, PID-checked, recovers after reboot); live countdown with `rerun`
+- [x] `pomo stats` today/week/month, daily goal, streak and best streak (DST-safe, locale week start); JSON-lines session log
+- [x] `track <desc> @project #tag` start/stop Toggl Track (v9) or Clockify (v1, regions) timer, pick project/workspace, restart recent entries, Universal Action
+- [x] Token in the Keychain via a hidden-input dialog (`security -i`, never in argv); 401/402/403/429/offline handled; cached with background refresh and back-off
+- [x] Link a pomodoro to a time-tracking entry automatically (config) or per entry (⌘↩)
 
 ## Tech
-- **Stack:** zsh + JXA; background timer via `launchd`-free detached process + Alfred External Triggers.
+- **Stack:** bash + JXA; background timer via a `launchd`-free detached waiter (`src/waiter.sh`) + Alfred External Triggers for notifications.
 - **Dependencies:** None (API tokens for Toggl/Clockify in Keychain).
 - Output via Alfred Script Filter JSON; settings via Workflow Configuration (`userconfigurationconfig`).
 - Secrets (API keys/tokens) in the macOS Keychain, never in `prefs.plist`.
@@ -38,16 +40,16 @@ Raycast demand this workflow replaces (downloads, 2026-09-26):
 ## Release checklist (Alfred forum + Gallery)
 Sources: alfred.app/submit, alfred.app/submit/styleguide, alfred.app/submit/screenshots, alfredforum.com topics 23976 and 23388.
 
-- [ ] README starts with `## Usage`; each paragraph ends "via the `kw` keyword" / "via the Universal Action"
+- [x] README starts with `## Usage`; each paragraph ends "via the `kw` keyword" / "via the Universal Action"
 - [ ] A clean screenshot (window only, transparent background, real-looking data, no other workflows) after each paragraph, stored in `images/`
-- [ ] Modifiers listed as `* <kbd>⌘</kbd><kbd>↩</kbd> Action.`; Quick Look written as <kbd>⌘</kbd><kbd>Y</kbd>
-- [ ] `## Setup` only for genuine manual steps (no app installs or API keys; the Gallery lists those)
-- [ ] Every keyword is ≥ 3 characters and configurable via `{var:keyword_*}`
-- [ ] Settings in Workflow Configuration; the info.plist `readme` (About This Workflow) matches README.md
-- [ ] Main icon ≥ 256×256 px
-- [ ] No self-updater; never download or install software (no pip/brew/curl of binaries); dependencies declared for Alfred to handle
-- [ ] Any compiled binary is Developer ID signed + notarised; never strip quarantine
-- [ ] No hard-coded paths; `prefs.plist` is git-ignored; secrets stay in Keychain
-- [ ] AI assistance disclosed in the README and the forum post
-- [ ] Version bumped in `src/info.plist`; `./build.sh`; GitHub release with the `.alfredworkflow` attached
+- [x] Modifiers listed as `* <kbd>⌘</kbd><kbd>↩</kbd> Action.`; Quick Look written as <kbd>⌘</kbd><kbd>Y</kbd>
+- [x] `## Setup` only for genuine manual steps (no app installs or API keys; the Gallery lists those)
+- [x] Every keyword is ≥ 3 characters and configurable via `{var:keyword_*}`
+- [x] Settings in Workflow Configuration; the info.plist `readme` (About This Workflow) matches README.md
+- [x] Main icon ≥ 256×256 px
+- [x] No self-updater; never download or install software (no pip/brew/curl of binaries); dependencies declared for Alfred to handle
+- [x] Any compiled binary is Developer ID signed + notarised; never strip quarantine
+- [x] No hard-coded paths; `prefs.plist` is git-ignored; secrets stay in Keychain
+- [x] AI assistance disclosed in the README and the forum post
+- [ ] Version bumped in `src/info.plist`; `python3 tools/build.py --package`; GitHub release with the `.alfredworkflow` attached
 - [ ] Forum post in "Share your Workflows" with a screenshot, keywords, and the GitHub link

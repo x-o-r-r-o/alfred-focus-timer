@@ -163,7 +163,8 @@ function withLock(fn, timeout) {
     const m = mtime(lock);
     const age = m === null ? 0 : Date.now() / 1000 - m;
     const owner = parseInt(readText(`${lock}/pid`) || "", 10);
-    let stale = m !== null && (age > 30 || (!owner && age > 2));
+    // owner === MY_PID: a lock left before a reboot whose PID now happens to be ours
+    let stale = m !== null && (age > 30 || (!owner && age > 2) || owner === MY_PID);
     if (!stale && owner && Date.now() - lastCheck > 100) {
       lastCheck = Date.now();
       stale = !processCommand(owner).includes("focus.js") && parseInt(readText(`${lock}/pid`) || "", 10) === owner;
@@ -760,8 +761,9 @@ function pomoItems(query) {
   const rest = q.slice(word.length).trim();
 
   // "+10" adds time to the running session
-  const plus = lower.match(/^\+\s*(.+)$/);
-  if (plus && active) {
+  const plus = lower.match(/^\+\s*(.*)$/);
+  if (plus && !active) return output([item("No session is running", "Start one first, then type +10 to add time", "info")]);
+  if (plus) {
     const secs = durationOf(plus[1].replace(/\s+/g, ""));
     if (secs) items.push(item(`Add ${fmtDur(secs)}`, `${fmtClock(remaining(s) + secs)} left afterwards`, "plus", { a: "extend", id: s.id, secs }));
     else items.push(item("Type a length to add, like +10 or +1h", "", "info"));
@@ -841,14 +843,17 @@ function http(method, url, headers, body) {
   return { status, json, text };
 }
 
-function checkResponse(prov, r) {
+function checkResponse(prov, r, path) {
   const n = prov.name;
   if (r.status === 0) {
     if (r.curl === 28) throw new ApiError(`${n} didn't respond in time`, "Check your connection and try again", "network");
     throw new ApiError(`Can't reach ${n}`, "Check your internet connection", "network");
   }
   if (r.status >= 200 && r.status < 300) return r.json;
-  if (r.status === 401 || r.status === 403) throw new ApiError(`${n} rejected the API token`, "Press ↩ to set a new token", "auth");
+  // A bad token is a 401 (Clockify) or a 403 (Toggl). Any other 403 is a permission problem, such
+  // as a workspace where you can't create tags, so it isn't reported as a bad token.
+  if (r.status === 401 || (r.status === 403 && /^\/(me|user)$/.test(path || ""))) throw new ApiError(`${n} rejected the API token`, "Press ↩ to set a new token", "auth", r.status);
+  if (r.status === 403) throw new ApiError(`${n} refused the request (403)`, "Check your access to this workspace, or press ↩ to set a new token", "auth", r.status);
   if (r.status === 402) throw new ApiError(`${n} API limit reached`, "Toggl limits API calls per hour on your plan. Try again later.", "quota");
   if (r.status === 429) throw new ApiError(`Too many requests to ${n}`, "Wait a minute and try again", "quota");
   if (r.status >= 500) throw new ApiError(`${n} is having problems (${r.status})`, "Try again later", "api");
@@ -900,7 +905,7 @@ const qs = (o) => Object.entries(o).map(([k, v]) => `${encodeURIComponent(k)}=${
 const enc = encodeURIComponent;
 
 function call(ctx, method, path, body) {
-  return checkResponse(ctx.prov, http(method, ctx.prov.base() + path, ctx.prov.headers(ctx.token), body));
+  return checkResponse(ctx.prov, http(method, ctx.prov.base() + path, ctx.prov.headers(ctx.token), body), path.split("?")[0]);
 }
 
 const Toggl = {
@@ -1273,6 +1278,7 @@ function trackItems(query) {
   };
   const p = parseTrack(q);
   const rerun = running || refreshing ? 1 : undefined;
+  const pomoNote = isActive(loadState()) ? " (replaces the running session)" : "";
 
   // Picking a project: the last word starts with @
   if (p.last.startsWith("@") && !/\s$/.test(query)) {
@@ -1294,7 +1300,7 @@ function trackItems(query) {
       const k = JSON.stringify([e.description, e.projectId, e.tags.slice().sort()]);
       if (seen.has(k)) continue;
       seen.add(k);
-      items.push(recentItem(e, ctx));
+      items.push(recentItem(e, pomoNote));
       if (seen.size >= 12) break;
     }
     items.push(item("Projects", `${projects.length} active in ${ctx.wsName || "this workspace"} · Type @ to pick one`, "project", null, { autocomplete: "@" }));
@@ -1324,7 +1330,7 @@ function trackItems(query) {
     const act = { a: "track-start", description: p.description, projectId: project ? project.id : null, project: project ? project.name : null, tags: tagNames };
     const line = [project ? `@ ${project.name}` : "", ...tagNames.map((t) => `#${t}`)].filter(Boolean).join(" · ");
     items.push(item(`Start ${what}`, `${line ? `${line} · ` : ""}${running ? `Stops “${oneLine(running.description, 40)}” · ` : ""}⌘↩ With a Pomodoro`, "play", act, {
-      mods: { cmd: mod(`Start with a ${fmtDur(lengthOf("focus"))} Pomodoro`, Object.assign({}, act, { pomo: true })) },
+      mods: { cmd: mod(`Start with a ${fmtDur(lengthOf("focus"))} Pomodoro${pomoNote}`, Object.assign({}, act, { pomo: true })) },
     }));
   }
   const f = norm(p.description);
@@ -1335,7 +1341,7 @@ function trackItems(query) {
       const k = JSON.stringify([e.description, e.projectId, e.tags.slice().sort()]);
       if (seen.has(k)) continue;
       seen.add(k);
-      items.push(recentItem(e, ctx));
+      items.push(recentItem(e, pomoNote));
       if (seen.size >= 8) break;
     }
   }
@@ -1343,11 +1349,11 @@ function trackItems(query) {
   return output(items, { rerun });
 }
 
-function recentItem(e, ctx) {
+function recentItem(e, pomoNote) {
   const dur = e.stop && e.start ? ` · ${fmtDur(e.stop - e.start)}` : "";
   const act = { a: "track-start", description: e.description, projectId: e.projectId, project: e.project, tags: e.tags };
   return item(e.description || "(no description)", `${entryLine(e) || "No project"}${dur} · ${relDay(e.start)} · ↩ Restart`, "recent", act, {
-    mods: { cmd: mod(`Restart with a ${fmtDur(lengthOf("focus"))} Pomodoro`, Object.assign({}, act, { pomo: true })) },
+    mods: { cmd: mod(`Restart with a ${fmtDur(lengthOf("focus"))} Pomodoro${pomoNote}`, Object.assign({}, act, { pomo: true })) },
   });
 }
 
