@@ -312,6 +312,11 @@ class PomodoroTests(Base):
         self.act({"a": "stop", "id": self.state()["id"]}, T0 + 60)
         self.assertEqual(self.sessions()[0]["label"], a["label"])
 
+    def test_long_label_is_cut_between_characters(self):
+        a = self.arg(self.sf("pomo", "10 " + "a" * 195 + "😀😀😀")[-1])  # UTF-16 cut would split the 2nd emoji
+        self.assertEqual(a["label"], "a" * 195 + "😀…")
+        a["label"].encode("utf-8")  # no lone surrogate
+
     def test_running_view_and_rerun(self):
         self.assertIn("Focus started: 25 min", self.start(label="Deep work"))
         data = self.sf("pomo", now=T0 + 60, full=True)
@@ -616,6 +621,13 @@ class WaiterTests(Base):
         time.sleep(1.5)
         self.assertEqual(len(self.waiters()), 1)
 
+    def test_waiter_has_its_own_process_group(self):
+        # Alfred may kill a terminated Script Filter's process group; the waiter must not be in it
+        self.act({"a": "start", "kind": "focus", "secs": 30, "label": "", "expect": ""})
+        pid = self.state()["pid"]
+        pgid = int(subprocess.run(["ps", "-o", "pgid=", "-p", str(pid)], capture_output=True, text=True).stdout)
+        self.assertEqual(pgid, pid)
+
     def test_stale_pid_after_reboot(self):
         # A PID recorded before a reboot may now belong to an unrelated process: it must not be
         # killed, and the session must get a new waiter (or finish if it's overdue).
@@ -747,6 +759,12 @@ class TogglTests(TrackBase):
         self.act(a)
         self.assertEqual(MOCK.requests[-1]["body"]["tags"], ["Deep Work", "writing", "brand-new"])
         self.assertEqual(sum(r["path"].endswith("/tags") for r in MOCK.requests), 1)
+
+    def test_entries_without_start_are_skipped(self):
+        MOCK.toggl_entries.append({"id": 50, "workspace_id": 11, "description": "Broken", "start": None, "stop": None, "duration": -1})
+        titles = [i["title"] for i in self.sf("track")]
+        self.assertEqual(titles[0], "Nothing is being tracked")
+        self.assertNotIn("Broken", titles)
 
     def test_workspace_word_in_a_description(self):
         self.assertEqual(self.sf("track", "ws review")[0]["title"], "Start “ws review”")

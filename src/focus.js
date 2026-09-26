@@ -32,9 +32,12 @@ function num(name, def, min, max) {
 const flag = (name) => env(name, "0") === "1";
 
 const pad = (n) => String(n).padStart(2, "0");
+// Collapse whitespace and shorten by characters (not UTF-16 units, so emoji are never cut in half).
 const oneLine = (s, max = 200) => {
   const t = String(s || "").replace(/\s+/g, " ").trim();
-  return t.length > max ? t.slice(0, max - 1) + "…" : t;
+  if (t.length <= max) return t;
+  const chars = Array.from(t);
+  return chars.length > max ? chars.slice(0, max - 1).join("") + "…" : t;
 };
 const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
@@ -204,9 +207,10 @@ function exec(path, args, input) {
   return { status: task.terminationStatus, out: str(out), err: str(err) };
 }
 
-// Start a program detached from Alfred (stdio to /dev/null) and return its PID.
+// Start a program detached from Alfred (stdio to /dev/null) and return its PID. `set -m` puts it
+// in its own process group, so it survives Alfred terminating the Script Filter that started it.
 function spawnDetached(args) {
-  const r = exec("/bin/bash", ["-c", 'nohup "$@" </dev/null >/dev/null 2>&1 & echo $!', "spawn", ...args]);
+  const r = exec("/bin/bash", ["-c", 'set -m; nohup "$@" </dev/null >/dev/null 2>&1 & echo $!', "spawn", ...args]);
   const pid = parseInt(r.out, 10);
   return isFinite(pid) ? pid : 0;
 }
@@ -929,7 +933,7 @@ const Toggl = {
   entries(ctx) {
     const t = now();
     const list = call(ctx, "GET", `/me/time_entries?${qs({ meta: "true", start_date: isoUTC(t - 14 * 86400), end_date: isoUTC(t + 86400) })}`) || [];
-    return list.map(Toggl.norm).sort((a, b) => b.start - a.start);
+    return list.map(Toggl.norm).filter((e) => e.start).sort((a, b) => b.start - a.start);
   },
   norm(e) {
     return {
@@ -990,7 +994,7 @@ const Clockify = {
   },
   entries(ctx) {
     const list = call(ctx, "GET", `/workspaces/${enc(ctx.ws)}/user/${enc(ctx.me.id)}/time-entries?${qs({ hydrated: "true", "page-size": 50 })}`) || [];
-    return list.map(Clockify.norm).sort((a, b) => b.start - a.start);
+    return list.map(Clockify.norm).filter((e) => e.start).sort((a, b) => b.start - a.start);
   },
   norm(e) {
     const ti = e.timeInterval || {};
