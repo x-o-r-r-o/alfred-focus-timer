@@ -1,0 +1,22 @@
+{
+  "icon": ["timer", "#E11D48"],
+  "focus": ["brain.head.profile", "#E11D48"],
+  "short": ["cup.and.saucer.fill", "#059669"],
+  "long": ["figure.walk", "#0D9488"],
+  "pause": ["pause.fill", "#D97706"],
+  "play": ["play.fill", "#16A34A"],
+  "stop": ["stop.fill", "#DC2626"],
+  "skip": ["forward.end.fill", "#7C3AED"],
+  "plus": ["plus", "#2563EB"],
+  "stats": ["chart.bar.fill", "#4F46E5"],
+  "streak": ["flame.fill", "#EA580C"],
+  "done": ["checkmark.circle.fill", "#16A34A"],
+  "track": ["stopwatch.fill", "#DB2777"],
+  "recent": ["clock.arrow.circlepath", "#0891B2"],
+  "project": ["folder.fill", "#9333EA"],
+  "workspace": ["building.2.fill", "#475569"],
+  "refresh": ["arrow.clockwise", "#0891B2"],
+  "key": ["key.horizontal.fill", "#CA8A04"],
+  "info": ["info.circle.fill", "#64748B"],
+  "error": ["exclamationmark.triangle.fill", "#DC2626"]
+}

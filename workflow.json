@@ -1,0 +1,395 @@
+{
+  "bundleid": "io.github.x-o-r-r-o.focus-timer",
+  "name": "Focus Timer",
+  "description": "Pomodoro timer with stats, plus Toggl Track and Clockify time tracking",
+  "category": "Productivity",
+  "createdby": "x-o-r-r-o",
+  "webaddress": "https://github.com/x-o-r-r-o/alfred-focus-timer",
+  "version": "1.0.0",
+  "variablesdontexport": [],
+  "config": [
+    {
+      "type": "textfield",
+      "variable": "keyword_pomo",
+      "label": "Keywords",
+      "description": "Pomodoro timer",
+      "config": {
+        "default": "pomo",
+        "placeholder": "pomo",
+        "required": true,
+        "trim": true
+      }
+    },
+    {
+      "type": "textfield",
+      "variable": "keyword_track",
+      "label": "",
+      "description": "Time tracking",
+      "config": {
+        "default": "track",
+        "placeholder": "track",
+        "required": true,
+        "trim": true
+      }
+    },
+    {
+      "type": "textfield",
+      "variable": "focus_minutes",
+      "label": "Focus",
+      "description": "Minutes",
+      "config": {
+        "default": "25",
+        "placeholder": "25",
+        "required": true,
+        "trim": true
+      }
+    },
+    {
+      "type": "textfield",
+      "variable": "short_minutes",
+      "label": "Short break",
+      "description": "Minutes",
+      "config": {
+        "default": "5",
+        "placeholder": "5",
+        "required": true,
+        "trim": true
+      }
+    },
+    {
+      "type": "textfield",
+      "variable": "long_minutes",
+      "label": "Long break",
+      "description": "Minutes",
+      "config": {
+        "default": "15",
+        "placeholder": "15",
+        "required": true,
+        "trim": true
+      }
+    },
+    {
+      "type": "textfield",
+      "variable": "long_every",
+      "label": "Long break after",
+      "description": "Focus sessions",
+      "config": {
+        "default": "4",
+        "placeholder": "4",
+        "required": true,
+        "trim": true
+      }
+    },
+    {
+      "type": "textfield",
+      "variable": "daily_goal",
+      "label": "Daily goal",
+      "description": "Pomodoros per day, shown in the stats (0 to hide)",
+      "config": {
+        "default": "8",
+        "placeholder": "8",
+        "required": true,
+        "trim": true
+      }
+    },
+    {
+      "type": "checkbox",
+      "variable": "auto_breaks",
+      "label": "Auto-start",
+      "description": "",
+      "config": {
+        "default": false,
+        "required": false,
+        "text": "Start a break when a focus session ends"
+      }
+    },
+    {
+      "type": "checkbox",
+      "variable": "auto_focus",
+      "label": "",
+      "description": "",
+      "config": {
+        "default": false,
+        "required": false,
+        "text": "Start a focus session when a break ends"
+      }
+    },
+    {
+      "type": "popupbutton",
+      "variable": "sound",
+      "label": "Sound",
+      "description": "Played when a session ends",
+      "config": {
+        "default": "Glass",
+        "pairs": [
+          [
+            "None",
+            "none"
+          ],
+          [
+            "Basso",
+            "Basso"
+          ],
+          [
+            "Blow",
+            "Blow"
+          ],
+          [
+            "Bottle",
+            "Bottle"
+          ],
+          [
+            "Frog",
+            "Frog"
+          ],
+          [
+            "Funk",
+            "Funk"
+          ],
+          [
+            "Glass",
+            "Glass"
+          ],
+          [
+            "Hero",
+            "Hero"
+          ],
+          [
+            "Morse",
+            "Morse"
+          ],
+          [
+            "Ping",
+            "Ping"
+          ],
+          [
+            "Pop",
+            "Pop"
+          ],
+          [
+            "Purr",
+            "Purr"
+          ],
+          [
+            "Sosumi",
+            "Sosumi"
+          ],
+          [
+            "Submarine",
+            "Submarine"
+          ],
+          [
+            "Tink",
+            "Tink"
+          ]
+        ]
+      }
+    },
+    {
+      "type": "checkbox",
+      "variable": "show_alfred",
+      "label": "When a session ends",
+      "description": "",
+      "config": {
+        "default": false,
+        "required": false,
+        "text": "Show Focus Timer in Alfred with the next session"
+      }
+    },
+    {
+      "type": "textfield",
+      "variable": "shortcut_start",
+      "label": "Shortcuts",
+      "description": "Run this Shortcut when a focus session starts, for example to turn on a Focus mode",
+      "config": {
+        "default": "",
+        "placeholder": "Shortcut name",
+        "required": false,
+        "trim": true
+      }
+    },
+    {
+      "type": "textfield",
+      "variable": "shortcut_end",
+      "label": "",
+      "description": "Run this Shortcut when a focus session ends",
+      "config": {
+        "default": "",
+        "placeholder": "Shortcut name",
+        "required": false,
+        "trim": true
+      }
+    },
+    {
+      "type": "popupbutton",
+      "variable": "tracker",
+      "label": "Time tracking",
+      "description": "Your API token is stored in the Keychain: set it via the track keyword",
+      "config": {
+        "default": "none",
+        "pairs": [
+          [
+            "None",
+            "none"
+          ],
+          [
+            "Toggl Track",
+            "toggl"
+          ],
+          [
+            "Clockify",
+            "clockify"
+          ]
+        ]
+      }
+    },
+    {
+      "type": "popupbutton",
+      "variable": "clockify_region",
+      "label": "Clockify region",
+      "description": "Where your Clockify workspace is hosted",
+      "config": {
+        "default": "global",
+        "pairs": [
+          [
+            "Global",
+            "global"
+          ],
+          [
+            "USA",
+            "usa"
+          ],
+          [
+            "EU (Germany)",
+            "eu"
+          ],
+          [
+            "UK",
+            "uk"
+          ],
+          [
+            "Australia",
+            "au"
+          ]
+        ]
+      }
+    },
+    {
+      "type": "checkbox",
+      "variable": "link_tracker",
+      "label": "Pomodoro tracking",
+      "description": "Starts a timer with the session label when a focus session starts, unless one is already running, and stops it when the session ends",
+      "config": {
+        "default": false,
+        "required": false,
+        "text": "Track focus sessions in Toggl Track or Clockify"
+      }
+    }
+  ],
+  "objects": [
+    {
+      "id": "sf_pomo",
+      "type": "scriptfilter",
+      "keyword": "{var:keyword_pomo}",
+      "title": "Focus Timer",
+      "subtext": "Start, pause or stop a Pomodoro",
+      "script": "osascript -l JavaScript ./focus.js pomo \"$1\""
+    },
+    {
+      "id": "sf_track",
+      "type": "scriptfilter",
+      "keyword": "{var:keyword_track}",
+      "title": "Time Tracking",
+      "subtext": "Start or stop a Toggl Track or Clockify timer",
+      "script": "osascript -l JavaScript ./focus.js track \"$1\"",
+      "running": "Loading…"
+    },
+    {
+      "id": "ua_track",
+      "type": "universalaction",
+      "name": "Track with Focus Timer",
+      "text": true
+    },
+    {
+      "id": "ext_pomo",
+      "type": "external",
+      "trigger": "pomo",
+      "note": "Shows the timer when a session ends (optional)"
+    },
+    {
+      "id": "ext_track",
+      "type": "external",
+      "trigger": "track",
+      "note": "Shows the time tracker after a refresh"
+    },
+    {
+      "id": "ext_notify",
+      "type": "external",
+      "trigger": "notify",
+      "note": "Notifications from the background timer"
+    },
+    {
+      "id": "action",
+      "type": "script",
+      "script": "osascript -l JavaScript ./focus.js action \"$1\""
+    },
+    {
+      "id": "notify",
+      "type": "notification"
+    },
+    {
+      "id": "notify_bg",
+      "type": "notification"
+    }
+  ],
+  "connections": [
+    {
+      "from": "ua_track",
+      "to": "sf_track"
+    },
+    {
+      "from": "ext_pomo",
+      "to": "sf_pomo"
+    },
+    {
+      "from": "ext_track",
+      "to": "sf_track"
+    },
+    {
+      "from": "ext_notify",
+      "to": "notify_bg"
+    },
+    {
+      "from": "sf_pomo",
+      "to": "action"
+    },
+    {
+      "from": "sf_pomo",
+      "to": "action",
+      "mod": "cmd"
+    },
+    {
+      "from": "sf_pomo",
+      "to": "action",
+      "mod": "alt"
+    },
+    {
+      "from": "sf_track",
+      "to": "action"
+    },
+    {
+      "from": "sf_track",
+      "to": "action",
+      "mod": "cmd"
+    },
+    {
+      "from": "sf_track",
+      "to": "action",
+      "mod": "alt"
+    },
+    {
+      "from": "action",
+      "to": "notify"
+    }
+  ]
+}

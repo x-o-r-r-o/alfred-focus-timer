@@ -7,46 +7,485 @@
 	<key>category</key>
 	<string>Productivity</string>
 	<key>connections</key>
-	<dict/>
+	<dict>
+		<key>24A8E851-16C7-5478-98D3-C9FFAE163C98</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>37615249-32E9-5EA6-9101-DFF4ABAA2A24</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+			<dict>
+				<key>destinationuid</key>
+				<string>37615249-32E9-5EA6-9101-DFF4ABAA2A24</string>
+				<key>modifiers</key>
+				<integer>1048576</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+			<dict>
+				<key>destinationuid</key>
+				<string>37615249-32E9-5EA6-9101-DFF4ABAA2A24</string>
+				<key>modifiers</key>
+				<integer>524288</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+		</array>
+		<key>2FC3B07E-AA7C-5746-BFF6-9B18D22B6F08</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>C1519EF6-4EA0-5A22-B8A8-88D798F9BC36</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+		</array>
+		<key>351A8203-132D-55CB-B44B-19F929329D9A</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>24A8E851-16C7-5478-98D3-C9FFAE163C98</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+		</array>
+		<key>37615249-32E9-5EA6-9101-DFF4ABAA2A24</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>237158A2-E07F-5BD1-99A9-5134C3ED8244</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+		</array>
+		<key>C1519EF6-4EA0-5A22-B8A8-88D798F9BC36</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>37615249-32E9-5EA6-9101-DFF4ABAA2A24</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+			<dict>
+				<key>destinationuid</key>
+				<string>37615249-32E9-5EA6-9101-DFF4ABAA2A24</string>
+				<key>modifiers</key>
+				<integer>1048576</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+			<dict>
+				<key>destinationuid</key>
+				<string>37615249-32E9-5EA6-9101-DFF4ABAA2A24</string>
+				<key>modifiers</key>
+				<integer>524288</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+		</array>
+		<key>C3554F98-B9A4-5EE1-9BC2-A0EA1C70944A</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>24A8E851-16C7-5478-98D3-C9FFAE163C98</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+		</array>
+		<key>FBB74459-8AD5-5A14-83E8-2F271EE93A38</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>165C056D-CDAC-5DFA-9DD1-FCCDF2EF0280</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+		</array>
+	</dict>
 	<key>createdby</key>
 	<string>x-o-r-r-o</string>
 	<key>description</key>
-	<string>Pomodoro/focus sessions plus Toggl and Clockify time tracking.</string>
+	<string>Pomodoro timer with stats, plus Toggl Track and Clockify time tracking</string>
+	<key>disabled</key>
+	<false/>
 	<key>name</key>
 	<string>Focus Timer</string>
 	<key>objects</key>
-	<array/>
+	<array>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>alfredfiltersresults</key>
+				<false/>
+				<key>alfredfiltersresultsmatchmode</key>
+				<integer>0</integer>
+				<key>argumenttreatemptyqueryasnil</key>
+				<true/>
+				<key>argumenttrimmode</key>
+				<integer>0</integer>
+				<key>argumenttype</key>
+				<integer>1</integer>
+				<key>escaping</key>
+				<integer>102</integer>
+				<key>keyword</key>
+				<string>{var:keyword_pomo}</string>
+				<key>queuedelaycustom</key>
+				<integer>3</integer>
+				<key>queuedelayimmediatelyinitially</key>
+				<true/>
+				<key>queuedelaymode</key>
+				<integer>0</integer>
+				<key>queuemode</key>
+				<integer>1</integer>
+				<key>runningsubtext</key>
+				<string>…</string>
+				<key>script</key>
+				<string>osascript -l JavaScript ./focus.js pomo "$1"</string>
+				<key>scriptargtype</key>
+				<integer>1</integer>
+				<key>scriptfile</key>
+				<string></string>
+				<key>skipuniversalaction</key>
+				<true/>
+				<key>subtext</key>
+				<string>Start, pause or stop a Pomodoro</string>
+				<key>title</key>
+				<string>Focus Timer</string>
+				<key>type</key>
+				<integer>0</integer>
+				<key>withspace</key>
+				<true/>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.input.scriptfilter</string>
+			<key>uid</key>
+			<string>C1519EF6-4EA0-5A22-B8A8-88D798F9BC36</string>
+			<key>version</key>
+			<integer>3</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>alfredfiltersresults</key>
+				<false/>
+				<key>alfredfiltersresultsmatchmode</key>
+				<integer>0</integer>
+				<key>argumenttreatemptyqueryasnil</key>
+				<true/>
+				<key>argumenttrimmode</key>
+				<integer>0</integer>
+				<key>argumenttype</key>
+				<integer>1</integer>
+				<key>escaping</key>
+				<integer>102</integer>
+				<key>keyword</key>
+				<string>{var:keyword_track}</string>
+				<key>queuedelaycustom</key>
+				<integer>3</integer>
+				<key>queuedelayimmediatelyinitially</key>
+				<true/>
+				<key>queuedelaymode</key>
+				<integer>0</integer>
+				<key>queuemode</key>
+				<integer>1</integer>
+				<key>runningsubtext</key>
+				<string>Loading…</string>
+				<key>script</key>
+				<string>osascript -l JavaScript ./focus.js track "$1"</string>
+				<key>scriptargtype</key>
+				<integer>1</integer>
+				<key>scriptfile</key>
+				<string></string>
+				<key>skipuniversalaction</key>
+				<true/>
+				<key>subtext</key>
+				<string>Start or stop a Toggl Track or Clockify timer</string>
+				<key>title</key>
+				<string>Time Tracking</string>
+				<key>type</key>
+				<integer>0</integer>
+				<key>withspace</key>
+				<true/>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.input.scriptfilter</string>
+			<key>uid</key>
+			<string>24A8E851-16C7-5478-98D3-C9FFAE163C98</string>
+			<key>version</key>
+			<integer>3</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>acceptsfiles</key>
+				<false/>
+				<key>acceptsmulti</key>
+				<integer>0</integer>
+				<key>acceptstext</key>
+				<true/>
+				<key>acceptsurls</key>
+				<false/>
+				<key>name</key>
+				<string>Track with Focus Timer</string>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.trigger.universalaction</string>
+			<key>uid</key>
+			<string>C3554F98-B9A4-5EE1-9BC2-A0EA1C70944A</string>
+			<key>version</key>
+			<integer>1</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>availableviaurlhandler</key>
+				<false/>
+				<key>triggerid</key>
+				<string>pomo</string>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.trigger.external</string>
+			<key>uid</key>
+			<string>2FC3B07E-AA7C-5746-BFF6-9B18D22B6F08</string>
+			<key>version</key>
+			<integer>1</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>availableviaurlhandler</key>
+				<false/>
+				<key>triggerid</key>
+				<string>track</string>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.trigger.external</string>
+			<key>uid</key>
+			<string>351A8203-132D-55CB-B44B-19F929329D9A</string>
+			<key>version</key>
+			<integer>1</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>availableviaurlhandler</key>
+				<false/>
+				<key>triggerid</key>
+				<string>notify</string>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.trigger.external</string>
+			<key>uid</key>
+			<string>FBB74459-8AD5-5A14-83E8-2F271EE93A38</string>
+			<key>version</key>
+			<integer>1</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>concurrently</key>
+				<false/>
+				<key>escaping</key>
+				<integer>102</integer>
+				<key>script</key>
+				<string>osascript -l JavaScript ./focus.js action "$1"</string>
+				<key>scriptargtype</key>
+				<integer>1</integer>
+				<key>scriptfile</key>
+				<string></string>
+				<key>type</key>
+				<integer>0</integer>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.action.script</string>
+			<key>uid</key>
+			<string>37615249-32E9-5EA6-9101-DFF4ABAA2A24</string>
+			<key>version</key>
+			<integer>2</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>lastpathcomponent</key>
+				<false/>
+				<key>onlyshowifquerypopulated</key>
+				<true/>
+				<key>removeextension</key>
+				<false/>
+				<key>text</key>
+				<string>{query}</string>
+				<key>title</key>
+				<string>{var:alfred_workflow_name}</string>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.output.notification</string>
+			<key>uid</key>
+			<string>237158A2-E07F-5BD1-99A9-5134C3ED8244</string>
+			<key>version</key>
+			<integer>1</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>lastpathcomponent</key>
+				<false/>
+				<key>onlyshowifquerypopulated</key>
+				<true/>
+				<key>removeextension</key>
+				<false/>
+				<key>text</key>
+				<string>{query}</string>
+				<key>title</key>
+				<string>{var:alfred_workflow_name}</string>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.output.notification</string>
+			<key>uid</key>
+			<string>165C056D-CDAC-5DFA-9DD1-FCCDF2EF0280</string>
+			<key>version</key>
+			<integer>1</integer>
+		</dict>
+	</array>
 	<key>readme</key>
-	<string># Focus Timer
+	<string>## Usage
 
-Pomodoro/focus sessions plus Toggl and Clockify time tracking.
+Start a focus session, a short break or a long break via the `pomo` keyword. While a session runs, the same keyword shows the time left and lets you pause, resume, stop, skip or add time. Type a length and an optional label to start a custom session, like `pomo 50 write report` or `pomo 1h30`. Type `short 10` or `long` to start a break.
 
-&gt; **Status:** planned — not yet functional. See [PLAN.md](PLAN.md).
+* &lt;kbd&gt;↩&lt;/kbd&gt; Start the session, or pause and resume the running one.
+* &lt;kbd&gt;⌘&lt;/kbd&gt;&lt;kbd&gt;↩&lt;/kbd&gt; Stop the running session and log the time so far.
+* &lt;kbd&gt;⌥&lt;/kbd&gt;&lt;kbd&gt;↩&lt;/kbd&gt; Skip to the next session.
 
-## Usage
+A notification and a sound mark the end of each session, even if the Mac was asleep in between. After four focus sessions the next break is a long one; the count starts again after three idle hours. Lengths, sound and automatic starts are set in the Workflow’s Configuration, which can also run a Shortcut when a focus session starts and ends, for example to turn a Focus mode on and off.
 
-Pomodoro/focus sessions plus Toggl and Clockify time tracking via the `pomo` keyword.
+### Stats
 
-![Focus Timer results in Alfred](images/pomo.png)
+See today’s and this week’s Pomodoros, focused time, your daily goal and your streak via the `pomo stats` keyword.
 
-* &lt;kbd&gt;↩&lt;/kbd&gt; Primary action.
-* &lt;kbd&gt;⌘&lt;/kbd&gt;&lt;kbd&gt;↩&lt;/kbd&gt; Secondary action.
-* &lt;kbd&gt;⌘&lt;/kbd&gt;&lt;kbd&gt;Y&lt;/kbd&gt; Quick Look.
+### Time Tracking
+
+Choose Toggl Track or Clockify in the Workflow’s Configuration, then start a timer via the `track` keyword. Type what you’re working on, with an optional project and tags, like `track writing docs @website #writing`. Type `@` to pick a project. With an empty query, it shows the running timer and your recent entries.
+
+* &lt;kbd&gt;↩&lt;/kbd&gt; Start the timer, restart a recent entry, or stop the running timer.
+* &lt;kbd&gt;⌘&lt;/kbd&gt;&lt;kbd&gt;↩&lt;/kbd&gt; Start the timer together with a Pomodoro focus session; the timer stops when the session ends.
+
+The first time, press &lt;kbd&gt;↩&lt;/kbd&gt; to paste your API token. It is stored in your macOS Keychain. Type `track workspace` to change the workspace and `track token` to replace the token.
+
+Alternatively, start a timer for the selected text via the Universal Action.
+
+To track every focus session automatically, turn on Pomodoro tracking in the Workflow’s Configuration.
 
 Every keyword can be changed in the Workflow’s Configuration.
-
-## Development
-
-```bash
-./build.sh   # -&gt; dist/alfred-focus-timer-&lt;version&gt;.alfredworkflow
-```
-
-## AI disclosure
-
-This workflow is developed with the help of Claude (Anthropic), an AI assistant. All code is reviewed and tested by the author.
 </string>
 	<key>uidata</key>
-	<dict/>
+	<dict>
+		<key>165C056D-CDAC-5DFA-9DD1-FCCDF2EF0280</key>
+		<dict>
+			<key>xpos</key>
+			<integer>250</integer>
+			<key>ypos</key>
+			<integer>280</integer>
+		</dict>
+		<key>237158A2-E07F-5BD1-99A9-5134C3ED8244</key>
+		<dict>
+			<key>xpos</key>
+			<integer>690</integer>
+			<key>ypos</key>
+			<integer>20</integer>
+		</dict>
+		<key>24A8E851-16C7-5478-98D3-C9FFAE163C98</key>
+		<dict>
+			<key>xpos</key>
+			<integer>250</integer>
+			<key>ypos</key>
+			<integer>150</integer>
+		</dict>
+		<key>2FC3B07E-AA7C-5746-BFF6-9B18D22B6F08</key>
+		<dict>
+			<key>note</key>
+			<string>Shows the timer when a session ends (optional)</string>
+			<key>xpos</key>
+			<integer>30</integer>
+			<key>ypos</key>
+			<integer>150</integer>
+		</dict>
+		<key>351A8203-132D-55CB-B44B-19F929329D9A</key>
+		<dict>
+			<key>note</key>
+			<string>Shows the time tracker after a refresh</string>
+			<key>xpos</key>
+			<integer>30</integer>
+			<key>ypos</key>
+			<integer>280</integer>
+		</dict>
+		<key>37615249-32E9-5EA6-9101-DFF4ABAA2A24</key>
+		<dict>
+			<key>xpos</key>
+			<integer>470</integer>
+			<key>ypos</key>
+			<integer>20</integer>
+		</dict>
+		<key>C1519EF6-4EA0-5A22-B8A8-88D798F9BC36</key>
+		<dict>
+			<key>xpos</key>
+			<integer>250</integer>
+			<key>ypos</key>
+			<integer>20</integer>
+		</dict>
+		<key>C3554F98-B9A4-5EE1-9BC2-A0EA1C70944A</key>
+		<dict>
+			<key>xpos</key>
+			<integer>30</integer>
+			<key>ypos</key>
+			<integer>20</integer>
+		</dict>
+		<key>FBB74459-8AD5-5A14-83E8-2F271EE93A38</key>
+		<dict>
+			<key>note</key>
+			<string>Notifications from the background timer</string>
+			<key>xpos</key>
+			<integer>30</integer>
+			<key>ypos</key>
+			<integer>410</integer>
+		</dict>
+	</dict>
 	<key>userconfigurationconfig</key>
 	<array>
 		<dict>
@@ -62,9 +501,9 @@ This workflow is developed with the help of Claude (Anthropic), an AI assistant.
 				<true/>
 			</dict>
 			<key>description</key>
-			<string></string>
+			<string>Pomodoro timer</string>
 			<key>label</key>
-			<string>Pomo keyword</string>
+			<string>Keywords</string>
 			<key>type</key>
 			<string>textfield</string>
 			<key>variable</key>
@@ -83,7 +522,7 @@ This workflow is developed with the help of Claude (Anthropic), an AI assistant.
 				<true/>
 			</dict>
 			<key>description</key>
-			<string></string>
+			<string>Time tracking</string>
 			<key>label</key>
 			<string></string>
 			<key>type</key>
@@ -91,9 +530,382 @@ This workflow is developed with the help of Claude (Anthropic), an AI assistant.
 			<key>variable</key>
 			<string>keyword_track</string>
 		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string>25</string>
+				<key>placeholder</key>
+				<string>25</string>
+				<key>required</key>
+				<true/>
+				<key>trim</key>
+				<true/>
+			</dict>
+			<key>description</key>
+			<string>Minutes</string>
+			<key>label</key>
+			<string>Focus</string>
+			<key>type</key>
+			<string>textfield</string>
+			<key>variable</key>
+			<string>focus_minutes</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string>5</string>
+				<key>placeholder</key>
+				<string>5</string>
+				<key>required</key>
+				<true/>
+				<key>trim</key>
+				<true/>
+			</dict>
+			<key>description</key>
+			<string>Minutes</string>
+			<key>label</key>
+			<string>Short break</string>
+			<key>type</key>
+			<string>textfield</string>
+			<key>variable</key>
+			<string>short_minutes</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string>15</string>
+				<key>placeholder</key>
+				<string>15</string>
+				<key>required</key>
+				<true/>
+				<key>trim</key>
+				<true/>
+			</dict>
+			<key>description</key>
+			<string>Minutes</string>
+			<key>label</key>
+			<string>Long break</string>
+			<key>type</key>
+			<string>textfield</string>
+			<key>variable</key>
+			<string>long_minutes</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string>4</string>
+				<key>placeholder</key>
+				<string>4</string>
+				<key>required</key>
+				<true/>
+				<key>trim</key>
+				<true/>
+			</dict>
+			<key>description</key>
+			<string>Focus sessions</string>
+			<key>label</key>
+			<string>Long break after</string>
+			<key>type</key>
+			<string>textfield</string>
+			<key>variable</key>
+			<string>long_every</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string>8</string>
+				<key>placeholder</key>
+				<string>8</string>
+				<key>required</key>
+				<true/>
+				<key>trim</key>
+				<true/>
+			</dict>
+			<key>description</key>
+			<string>Pomodoros per day, shown in the stats (0 to hide)</string>
+			<key>label</key>
+			<string>Daily goal</string>
+			<key>type</key>
+			<string>textfield</string>
+			<key>variable</key>
+			<string>daily_goal</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<false/>
+				<key>required</key>
+				<false/>
+				<key>text</key>
+				<string>Start a break when a focus session ends</string>
+			</dict>
+			<key>description</key>
+			<string></string>
+			<key>label</key>
+			<string>Auto-start</string>
+			<key>type</key>
+			<string>checkbox</string>
+			<key>variable</key>
+			<string>auto_breaks</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<false/>
+				<key>required</key>
+				<false/>
+				<key>text</key>
+				<string>Start a focus session when a break ends</string>
+			</dict>
+			<key>description</key>
+			<string></string>
+			<key>label</key>
+			<string></string>
+			<key>type</key>
+			<string>checkbox</string>
+			<key>variable</key>
+			<string>auto_focus</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string>Glass</string>
+				<key>pairs</key>
+				<array>
+					<array>
+						<string>None</string>
+						<string>none</string>
+					</array>
+					<array>
+						<string>Basso</string>
+						<string>Basso</string>
+					</array>
+					<array>
+						<string>Blow</string>
+						<string>Blow</string>
+					</array>
+					<array>
+						<string>Bottle</string>
+						<string>Bottle</string>
+					</array>
+					<array>
+						<string>Frog</string>
+						<string>Frog</string>
+					</array>
+					<array>
+						<string>Funk</string>
+						<string>Funk</string>
+					</array>
+					<array>
+						<string>Glass</string>
+						<string>Glass</string>
+					</array>
+					<array>
+						<string>Hero</string>
+						<string>Hero</string>
+					</array>
+					<array>
+						<string>Morse</string>
+						<string>Morse</string>
+					</array>
+					<array>
+						<string>Ping</string>
+						<string>Ping</string>
+					</array>
+					<array>
+						<string>Pop</string>
+						<string>Pop</string>
+					</array>
+					<array>
+						<string>Purr</string>
+						<string>Purr</string>
+					</array>
+					<array>
+						<string>Sosumi</string>
+						<string>Sosumi</string>
+					</array>
+					<array>
+						<string>Submarine</string>
+						<string>Submarine</string>
+					</array>
+					<array>
+						<string>Tink</string>
+						<string>Tink</string>
+					</array>
+				</array>
+			</dict>
+			<key>description</key>
+			<string>Played when a session ends</string>
+			<key>label</key>
+			<string>Sound</string>
+			<key>type</key>
+			<string>popupbutton</string>
+			<key>variable</key>
+			<string>sound</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<false/>
+				<key>required</key>
+				<false/>
+				<key>text</key>
+				<string>Show Focus Timer in Alfred with the next session</string>
+			</dict>
+			<key>description</key>
+			<string></string>
+			<key>label</key>
+			<string>When a session ends</string>
+			<key>type</key>
+			<string>checkbox</string>
+			<key>variable</key>
+			<string>show_alfred</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string></string>
+				<key>placeholder</key>
+				<string>Shortcut name</string>
+				<key>required</key>
+				<false/>
+				<key>trim</key>
+				<true/>
+			</dict>
+			<key>description</key>
+			<string>Run this Shortcut when a focus session starts, for example to turn on a Focus mode</string>
+			<key>label</key>
+			<string>Shortcuts</string>
+			<key>type</key>
+			<string>textfield</string>
+			<key>variable</key>
+			<string>shortcut_start</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string></string>
+				<key>placeholder</key>
+				<string>Shortcut name</string>
+				<key>required</key>
+				<false/>
+				<key>trim</key>
+				<true/>
+			</dict>
+			<key>description</key>
+			<string>Run this Shortcut when a focus session ends</string>
+			<key>label</key>
+			<string></string>
+			<key>type</key>
+			<string>textfield</string>
+			<key>variable</key>
+			<string>shortcut_end</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string>none</string>
+				<key>pairs</key>
+				<array>
+					<array>
+						<string>None</string>
+						<string>none</string>
+					</array>
+					<array>
+						<string>Toggl Track</string>
+						<string>toggl</string>
+					</array>
+					<array>
+						<string>Clockify</string>
+						<string>clockify</string>
+					</array>
+				</array>
+			</dict>
+			<key>description</key>
+			<string>Your API token is stored in the Keychain: set it via the track keyword</string>
+			<key>label</key>
+			<string>Time tracking</string>
+			<key>type</key>
+			<string>popupbutton</string>
+			<key>variable</key>
+			<string>tracker</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string>global</string>
+				<key>pairs</key>
+				<array>
+					<array>
+						<string>Global</string>
+						<string>global</string>
+					</array>
+					<array>
+						<string>USA</string>
+						<string>usa</string>
+					</array>
+					<array>
+						<string>EU (Germany)</string>
+						<string>eu</string>
+					</array>
+					<array>
+						<string>UK</string>
+						<string>uk</string>
+					</array>
+					<array>
+						<string>Australia</string>
+						<string>au</string>
+					</array>
+				</array>
+			</dict>
+			<key>description</key>
+			<string>Where your Clockify workspace is hosted</string>
+			<key>label</key>
+			<string>Clockify region</string>
+			<key>type</key>
+			<string>popupbutton</string>
+			<key>variable</key>
+			<string>clockify_region</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<false/>
+				<key>required</key>
+				<false/>
+				<key>text</key>
+				<string>Track focus sessions in Toggl Track or Clockify</string>
+			</dict>
+			<key>description</key>
+			<string>Starts a timer with the session label when a focus session starts, unless one is already running, and stops it when the session ends</string>
+			<key>label</key>
+			<string>Pomodoro tracking</string>
+			<key>type</key>
+			<string>checkbox</string>
+			<key>variable</key>
+			<string>link_tracker</string>
+		</dict>
 	</array>
+	<key>variables</key>
+	<dict/>
+	<key>variablesdontexport</key>
+	<array/>
 	<key>version</key>
-	<string>0.1.0</string>
+	<string>1.0.0</string>
 	<key>webaddress</key>
 	<string>https://github.com/x-o-r-r-o/alfred-focus-timer</string>
 </dict>
