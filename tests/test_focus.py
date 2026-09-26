@@ -689,6 +689,47 @@ class StatsTests(Base):
         self.assertTrue(self.sf("pomo", "stats", now=self.local(2026, 9, 23), FT_FIRST_WEEKDAY="7")[1]["title"].startswith("This week: 2 pomodoros"))
 
 
+    # --- round 4 ---
+
+    def test_silent_actions_print_nothing(self):
+        # The action's output feeds a notification that only shows when populated: a bare newline
+        # would show an empty notification.
+        for arg in ({"a": "reveal"}, {"a": "pause", "id": "0" * 20}, "not json"):
+            out = self.run_js("action", arg if isinstance(arg, str) else json.dumps(arg))
+            if arg == {"a": "pause", "id": "0" * 20}:
+                self.assertEqual(out, "That timer has already ended.\n")
+            else:
+                self.assertEqual(out, "", arg)
+        self.assertEqual(self.run_js("action", json.dumps({"a": "track-ws", "ws": 1, "name": "x"}), tracker="none"),
+                         "Choose Toggl Track or Clockify in the Workflow’s Configuration.\n")
+        self.assertEqual(self.run_js("action", json.dumps({"a": "open", "url": "https://example.com"}), tracker="toggl"), "")
+        self.assertEqual(self.run_js("complete", "0" * 20), "")
+        self.assertEqual(self.run_js("shortcut-failed", "x"), "")
+
+    def test_recent_custom_sessions(self):
+        os.makedirs(self.data, exist_ok=True)
+        log = [{"kind": "focus", "end": T0 - 900 + i, "planned": secs, "focused": secs, "outcome": "completed", "label": label}
+               for i, (secs, label) in enumerate([(3000, "Write report"), (1500, ""), (1500, "Email ✉️"), (5400, ""), (3000, "Write report"), (1500, "")])]
+        log.append({"kind": "short", "end": T0 - 10, "planned": 600, "focused": 600, "outcome": "completed", "label": ""})
+        log.append({"kind": "focus", "end": T0 - 5, "planned": "x", "focused": 1, "outcome": "stopped"})  # damaged: skipped
+        with open(os.path.join(self.data, "sessions.jsonl"), "w") as f:
+            f.write("".join(json.dumps(e) + "\n" for e in log))
+        it = self.sf("pomo")
+        recent = [i for i in it if i["subtitle"].startswith("Recent · ")]
+        self.assertEqual([i["title"] for i in recent], ["Focus · 50 min · Write report", "Focus · 1 h 30 min", "Focus · 25 min · Email ✉️"])
+        self.assertEqual(self.arg(recent[0]), {"a": "start", "kind": "focus", "secs": 3000, "label": "Write report", "expect": ""})
+        self.assertEqual(it[-1]["title"].split(":")[0], "Today")
+        # typing part of a label offers the matching recent sessions after the new one
+        it = self.sf("pomo", "write")
+        self.assertEqual(it[0]["title"], "Start Focus · 25 min · write")
+        self.assertEqual([i["title"] for i in it[1:]], ["Focus · 50 min · Write report"])
+        self.assertEqual(len(self.sf("pomo", "50 write")), 1)  # a length typed: no suggestions
+        # not shown while a session runs
+        self.start()
+        self.assertFalse([i for i in self.sf("pomo", now=T0 + 5) if i["subtitle"].startswith("Recent")])
+
+
+
 class WaiterTests(Base):
     """Real background waiters with very short sessions (no injected clock)."""
 
@@ -705,7 +746,9 @@ class WaiterTests(Base):
             return False
 
     def waiters(self):
-        return subprocess.run(["pgrep", "-f", f"waiter.sh .* {self.data}"], capture_output=True, text=True).stdout.split()
+        # Only the waiter itself: not the short-lived spawning shell (or its fork before exec),
+        # whose command line also names waiter.sh and the data folder.
+        return subprocess.run(["pgrep", "-f", f"^/bin/bash /.*waiter\\.sh [0-9a-f]{{20}} {self.data}$"], capture_output=True, text=True).stdout.split()
 
     def test_waiter_fires_and_exits(self):
         self.act({"a": "start", "kind": "focus", "secs": 2, "label": "Quick", "expect": ""})
@@ -861,6 +904,24 @@ class WaiterTests(Base):
             self.assertEqual(self.waiters(), [str(s["pid"])])  # exactly one, and it is the one on record
             self.act({"a": "stop", "id": s["id"]})
             self.assertTrue(self.wait_for(lambda: not self.waiters(), 3))
+
+    def test_waiter_survives_the_workflow_folder_being_replaced(self):
+        # Updating (or syncing) the workflow replaces its folder at the same path while a session
+        # runs; the waiter's old working directory is then gone. It must still end the session.
+        wf = os.path.join(self.tmp, "Alfred prefs", "workflows", "user.workflow.1234 ü")
+        shutil.copytree(SRC, wf)
+        env = dict(self.env, PATH="/usr/bin:/bin:/usr/sbin:/sbin")
+        for k in [k for k in env if k.startswith("LC_") or k == "LANG"]:
+            env.pop(k)
+        out = subprocess.run(["/bin/bash", "-c", 'osascript -l JavaScript ./focus.js action "$1"', "a",
+                              json.dumps({"a": "start", "kind": "focus", "secs": 3, "label": "Update", "expect": ""})],
+                             cwd=wf, env=env, capture_output=True, text=True, timeout=60)
+        self.assertIn("Focus started", out.stdout, out.stderr)
+        self.assertEqual(len(self.waiters()), 1)
+        shutil.rmtree(wf)
+        shutil.copytree(SRC, wf)
+        self.assertTrue(self.wait_for(lambda: any("Focus complete: Update." in f for f in self.effects()), 10), self.effects())
+        self.assertTrue(self.wait_for(lambda: not self.waiters(), 5))
 
 
 # ---------------------------------------------------------------- Time tracking
@@ -1134,6 +1195,39 @@ class TogglTests(TrackBase):
         self.assertIn("Toggl: Can't reach Toggl Track.", msg)
         self.assertEqual(self.state()["status"], "running")
 
+    def test_report(self):
+        MOCK.toggl_entries.insert(0, {"id": 9, "workspace_id": 11, "description": "Now", "project_id": None, "tags": [],
+                                      "start": iso(T0 - 600), "stop": None, "duration": -1})
+        MOCK.toggl_entries.append({"id": 10, "workspace_id": 12, "description": "Other workspace", "project_id": 201, "project_name": "Side Project",
+                                   "tags": [], "start": iso(T0 - 600), "stop": iso(T0 - 300), "duration": 300})
+        # T0 is Monday 2026-09-21 16:13 in Paris
+        it = self.sf("track", "report", FT_FIRST_WEEKDAY="2")
+        self.assertEqual([i["title"] for i in it], ["Today: 1 h 10 min tracked", "This week: 1 h 10 min tracked",
+                                                     "@ Website Redesign · 1 h", "No project · 10 min"])
+        self.assertEqual(it[1]["subtitle"], "2 entries since 2026-09-21")
+        self.assertEqual(it[2]["autocomplete"], "@Website_Redesign ")
+        it = self.sf("track", "report", FT_FIRST_WEEKDAY="7")  # the week started on Saturday
+        self.assertEqual([i["title"] for i in it[1:]], ["This week: 2 h 40 min tracked", "@ Website Redesign · 2 h", "No project · 40 min"])
+        self.assertEqual(it[2]["subtitle"], "This week · Today: 1 h")
+        self.assertEqual(self.find(self.sf("track"), "Report")["autocomplete"], "report")
+        it = self.sf("track", "report", FT_TOGGL_URL="http://127.0.0.1:9/api", FT_ENTRY_TTL="0")  # offline: the saved entries
+        self.assertEqual([i["title"] for i in it[:2]], ["Can't reach Toggl Track", "Today: 1 h 10 min tracked"])
+
+    def test_default_project(self):
+        it = self.sf("track", "Standup", default_project=" website red ")
+        a = self.arg(it[0])
+        self.assertEqual((it[0]["title"], a["projectId"], a["project"]), ("Start “Standup”", 101, "Website Redesign"))
+        self.assertEqual(self.sf("track", "@side Standup", default_project="Website Redesign")[0]["title"], "No project matches “side”")  # typed @ wins
+        self.assertEqual(self.arg(self.sf("track", "@café Standup", default_project="Website Redesign")[0])["projectId"], 103)
+        self.assertIsNone(self.arg(self.sf("track", "Standup", default_project="Website")[0])["projectId"])  # ambiguous: none
+        self.assertIsNone(self.arg(self.sf("track", "Standup", default_project="nope")[0])["projectId"])
+        self.assertIsNone(self.arg(self.sf("track", "Standup", default_project="")[0])["projectId"])
+        # Pomodoro tracking uses it too
+        self.start(label="Deep work", link_tracker="1", default_project="Café Opening")
+        post = [r for r in MOCK.requests if r["method"] == "POST"][-1]
+        self.assertEqual((post["body"]["description"], post["body"]["project_id"]), ("Deep work", 103))
+        self.act({"a": "stop", "id": self.state()["id"]}, T0 + 60, link_tracker="1")
+
     def test_universal_action_text(self):
         it = self.sf("track", "Review PR\n#123 from Jane")
         self.assertEqual(it[0]["title"], "Start “Review PR from Jane”")
@@ -1253,6 +1347,13 @@ class TogglTests(TrackBase):
 
 class ClockifyTests(TrackBase):
     provider = "clockify"
+
+    def test_report(self):
+        it = self.sf("track", "report", FT_FIRST_WEEKDAY="2")
+        self.assertEqual([i["title"] for i in it], ["Today: 17 min tracked", "This week: 17 min tracked", "@ Internal · 17 min"])
+        self.assertEqual(it[1]["subtitle"], "1 entry since 2026-09-21")
+        MOCK.c_entries = [dict(MOCK.c_entries[0], id=f"x{i}") for i in range(50)]
+        self.assertIn("From your 50 most recent entries", self.sf("track", "report", FT_ENTRY_TTL="0")[1]["subtitle"])
 
     def test_list_start_stop(self):
         it = self.sf("track")

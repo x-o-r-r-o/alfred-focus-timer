@@ -227,7 +227,7 @@ function exec(path, args, input) {
 // Start a program detached from Alfred (stdio to /dev/null) and return its PID. `set -m` puts it
 // in its own process group, so it survives Alfred terminating the Script Filter that started it.
 function spawnDetached(args) {
-  const r = exec("/bin/bash", ["-c", 'set -m; nohup "$@" </dev/null >/dev/null 2>&1 & echo $!', "spawn", ...args]);
+  const r = exec("/bin/bash", ["-c", 'set -m; /usr/bin/nohup "$@" </dev/null >/dev/null 2>&1 & echo $!', "spawn", ...args]);
   const pid = parseInt(r.out, 10);
   return isFinite(pid) ? pid : 0;
 }
@@ -663,6 +663,13 @@ function firstWeekday() {
   return Number($.NSCalendar.currentCalendar.firstWeekday) || 2;
 }
 
+// Day key of the first day of the week containing t (the locale's first weekday).
+function weekStartKey(t) {
+  const d = new Date(t * 1000);
+  const back = (d.getDay() - (firstWeekday() - 1) + 7) % 7;
+  return dayKey(new Date(d.getFullYear(), d.getMonth(), d.getDate() - back, 12).getTime() / 1000);
+}
+
 function computeStats(t) {
   const log = readLog();
   const days = {};
@@ -675,8 +682,7 @@ function computeStats(t) {
   }
   const today = dayKey(t);
   const d = new Date(t * 1000);
-  const back = (d.getDay() - (firstWeekday() - 1) + 7) % 7;
-  const weekStart = dayKey(new Date(d.getFullYear(), d.getMonth(), d.getDate() - back, 12).getTime() / 1000);
+  const weekStart = weekStartKey(t);
   const monthStart = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-01`;
   const sum = (from) => {
     const r = { pomos: 0, focused: 0 };
@@ -778,6 +784,33 @@ function statusItems(s) {
   return items;
 }
 
+// The last few distinct focus sessions with a label or a non-default length, newest first, so a
+// "50 min · write report" session can be started again with one key. filter: part of the label.
+function recentSessions(filter, max) {
+  const def = lengthOf("focus"), f = norm(filter || "");
+  const seen = new Set(), out = [];
+  const log = readLog();
+  for (let i = log.length - 1; i >= 0 && out.length < max; i--) {
+    const e = log[i];
+    const secs = Math.round(Number(e.planned));
+    const label = typeof e.label === "string" ? oneLine(e.label) : "";
+    if (e.kind !== "focus" || !(secs >= 1 && secs <= MAX_SECS) || (secs === def && !label)) continue;
+    if (f && !norm(label).includes(f)) continue;
+    const k = `${secs} ${label}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push({ secs, label });
+  }
+  return out;
+}
+
+function recentSessionItem(s, r) {
+  const it = startItem(s, "focus", r.secs, r.label, false);
+  it.subtitle = `Recent · ${it.subtitle}`;
+  it.icon = { path: "icons/recent.png" };
+  return it;
+}
+
 function statsLine() {
   const st = computeStats(now());
   const goal = Math.round(num("daily_goal", 8, 0, 100));
@@ -822,6 +855,7 @@ function pomoItems(query) {
       if (order[0] === "focus") first.subtitle += " · Type a length like 50 or 1h30, then a label";
       items.push(first);
       for (const k of order.slice(1)) items.push(startItem(s, k, lengthOf(k), "", true));
+      for (const r of recentSessions("", 3)) items.push(recentSessionItem(s, r));
     }
     items.push(statsLine());
     return output(items, { rerun });
@@ -870,7 +904,13 @@ function pomoItems(query) {
   // anything else: a focus session with an optional length and label
   const p = parseDuration(q);
   if (p.secs !== null && (p.secs < 1 || p.secs > MAX_SECS)) items.push(item("Sessions can be up to 24 hours", "Type a length like 25, 50, 1h30 or 90s", "error"));
-  else items.push(startItem(s, "focus", p.secs || lengthOf("focus"), p.label, true));
+  else {
+    items.push(startItem(s, "focus", p.secs || lengthOf("focus"), p.label, true));
+    // "pomo write" also offers recent sessions whose label contains the words typed
+    if (p.secs === null && p.label) {
+      for (const r of recentSessions(p.label, 4)) if (r.label !== p.label || r.secs !== lengthOf("focus")) items.push(recentSessionItem(s, r));
+    }
+  }
   return output(items, { rerun });
 }
 
@@ -1375,6 +1415,15 @@ function trackItems(query) {
     return output(errorItems(prov, e));
   }
 
+  if (/^report$/.test(lower)) {
+    try {
+      return output(reportItems(ctx));
+    } catch (e) {
+      if (!(e instanceof ApiError)) throw e;
+      return output(errorItems(prov, e));
+    }
+  }
+
   if (/^workspaces?(\s|$)/.test(lower)) {
     try {
       const list = cached(ctx, "workspaces", DAY, () => prov.workspaces(ctx));
@@ -1463,6 +1512,7 @@ function trackItems(query) {
       items.push(recentItem(e, pomoNote));
       if (seen.size >= 12) break;
     }
+    items.push(item("Report", "Time tracked today and this week, by project", "stats", null, { autocomplete: "report" }));
     items.push(item("Projects", `${projects.length} active in ${ctx.wsName || "this workspace"} · Type @ to pick one`, "project", null, { autocomplete: "@" }));
     items.push(item(`Workspace${ctx.wsName ? `: ${ctx.wsName}` : ""}`, `Choose the ${prov.name} workspace`, "workspace", null, { autocomplete: "workspace " }));
     const when = refreshing ? "Refreshing…" : age < 60 ? "Updated just now" : `Updated ${fmtDur(age)} ago`;
@@ -1477,7 +1527,7 @@ function trackItems(query) {
     const m = matchProject(projects, p.project);
     project = m.project;
     if (!project) warn = m.list.length ? `“${p.project}” matches ${m.list.length} projects: type more` : `No project matches “${p.project}”`;
-  }
+  } else project = defaultProject(projects);
   const tagNames = p.tags.map((t) => {
     const found = tags.find((x) => norm(x.name) === norm(t));
     return found ? found.name : t;
@@ -1509,12 +1559,64 @@ function trackItems(query) {
   return output(items, { rerun });
 }
 
+// Time tracked today and this week in this workspace, in total and by project, from the cached
+// entries (Toggl Track: the last 14 days; Clockify: the 50 most recent entries).
+function reportItems(ctx) {
+  let r, head = [];
+  try {
+    r = loadEntries(ctx);
+  } catch (e) {
+    // offline or refused: report from the saved entries, below the error
+    const c = savedEntries(ctx);
+    if (!(e instanceof ApiError) || !c) throw e;
+    head = errorItems(ctx.prov, e);
+    r = { entries: c.v };
+  }
+  const t = now(), today = dayKey(t), week = weekStartKey(t);
+  const byProject = new Map();
+  let dayTotal = 0, weekTotal = 0, weekCount = 0;
+  for (const e of r.entries) {
+    if (String(e.ws) !== String(ctx.ws) || !e.start) continue;
+    const k = dayKey(e.start);
+    if (k < week || k > today) continue;
+    const secs = Math.max(0, (e.running ? t : e.stop || e.start) - e.start);
+    const name = e.project || "";
+    const p = byProject.get(name) || { name, week: 0, today: 0 };
+    p.week += secs;
+    weekTotal += secs;
+    weekCount++;
+    if (k === today) {
+      p.today += secs;
+      dayTotal += secs;
+    }
+    byProject.set(name, p);
+  }
+  const partial = ctx.prov.key === "clockify" && r.entries.length >= 50 ? " · From your 50 most recent entries" : "";
+  const items = [
+    ...head,
+    item(`Today: ${fmtDur(dayTotal)} tracked`, `${ctx.wsName || ctx.prov.name}${r.refreshing ? " · Refreshing…" : ""}`, "stats"),
+    item(`This week: ${fmtDur(weekTotal)} tracked`, `${weekCount} ${weekCount === 1 ? "entry" : "entries"} since ${week}${partial}`, "stats"),
+  ];
+  for (const p of [...byProject.values()].sort((a, b) => b.week - a.week || a.name.localeCompare(b.name))) {
+    items.push(item(`${p.name ? `@ ${p.name}` : "No project"} · ${fmtDur(p.week)}`, `This week · Today: ${fmtDur(p.today)}`, "project",
+      null, p.name ? { autocomplete: `@${slug(p.name)} ` } : {}));
+  }
+  return items;
+}
+
 function recentItem(e, pomoNote) {
   const dur = e.stop && e.start ? ` · ${fmtDur(e.stop - e.start)}` : "";
   const act = { a: "track-start", description: e.description, projectId: e.projectId, project: e.project, tags: e.tags };
   return item(e.description || "(no description)", `${entryLine(e) || "No project"}${dur} · ${relDay(e.start)} · ↩ Restart`, "recent", act, {
     mods: { cmd: mod(`Restart with a ${fmtDur(lengthOf("focus"))} Pomodoro${pomoNote}`, Object.assign({}, act, { pomo: true })) },
   });
+}
+
+// The project from the Workflow's Configuration, used when no @project is typed (exact name or a
+// unique match, like @project); null when it's empty or matches nothing.
+function defaultProject(projects) {
+  const name = String(env("default_project", "")).trim().replace(/^@/, "");
+  return name ? matchProject(projects, name).project || null : null;
 }
 
 // ----- tracking actions -----
@@ -1636,7 +1738,13 @@ function trackerStartForFocus(f) {
     const ctx = context(prov);
     const running = fetchEntries(ctx).find((e) => e.running);
     if (running) return `${prov.short} is already tracking “${oneLine(running.description, 40)}”.`;
-    const entry = startEntry(ctx, { description: f.label || "Focus", tags: [] });
+    let project = null;
+    try {
+      project = defaultProject(cached(ctx, `projects-${ctx.ws}`, DAY, () => prov.projects(ctx)));
+    } catch (e) {
+      project = null; // start without a project rather than not at all
+    }
+    const entry = startEntry(ctx, { description: f.label || "Focus", tags: [], projectId: project ? project.id : null, project: project ? project.name : null });
     let owned = false;
     withLock(() => {
       const s = loadState();
@@ -1687,7 +1795,14 @@ function action(arg) {
   return trackAction(a);
 }
 
+// osascript prints a returned "" as an empty line, and Alfred's notification ("only show if
+// populated") would then pop up empty after a silent action: return nothing at all instead.
 function run(argv) {
+  const r = main(argv);
+  return r === "" || r === undefined || r === null ? undefined : r;
+}
+
+function main(argv) {
   const [cmd, ...rest] = argv;
   const arg = rest.join(" ");
   try {
