@@ -46,8 +46,10 @@ function fmtClock(secs) {
 
 function fmtDur(secs) {
   secs = Math.max(0, Math.round(secs));
+  if (secs === 0) return "0 min";
   if (secs < 60) return `${secs} s`;
-  const h = Math.floor(secs / 3600), m = Math.round((secs % 3600) / 60);
+  const mins = Math.round(secs / 60);
+  const h = Math.floor(mins / 60), m = mins % 60;
   if (!h) return `${m} min`;
   return m ? `${h} h ${m} min` : `${h} h`;
 }
@@ -146,19 +148,31 @@ function appendLine(p, line) {
   fh.closeFile;
 }
 
-// A cross-process mutex: mkdir is atomic. A lock older than 15 s is left over from a crash.
-function withLock(fn, name = "lock") {
-  const lock = `${dataDir()}/${name}`;
-  const deadline = Date.now() + 4000;
+// A cross-process mutex: mkdir is atomic, and the owner's PID is written inside. Alfred terminates
+// a Script Filter that is still running when you type, so a lock whose owner is gone (or no
+// longer a focus.js process, as PIDs get reused) is stale and taken over at once.
+const MY_PID = Number($.NSProcessInfo.processInfo.processIdentifier);
+function withLock(fn, timeout) {
+  const lock = `${dataDir()}/lock`;
+  const deadline = Date.now() + 1000 * (timeout || num("FT_LOCK_TIMEOUT", 5, 0.1, 60));
+  let lastCheck = 0;
   while (!FM.createDirectoryAtPathWithIntermediateDirectoriesAttributesError(lock, false, $(), $())) {
     const m = mtime(lock);
-    if (m !== null && Date.now() / 1000 - m > 15) {
+    const age = m === null ? 0 : Date.now() / 1000 - m;
+    const owner = parseInt(readText(`${lock}/pid`) || "", 10);
+    let stale = m !== null && (age > 30 || (!owner && age > 2));
+    if (!stale && owner && Date.now() - lastCheck > 100) {
+      lastCheck = Date.now();
+      stale = !processCommand(owner).includes("focus.js") && parseInt(readText(`${lock}/pid`) || "", 10) === owner;
+    }
+    if (stale) {
       removeFile(lock);
       continue;
     }
     if (Date.now() > deadline) throw new Error("Focus Timer is busy, try again");
     $.NSThread.sleepForTimeInterval(0.02);
   }
+  writeText(`${lock}/pid`, String(MY_PID));
   try {
     return fn();
   } finally {
@@ -318,10 +332,16 @@ function loadState() {
   return Object.assign({ status: "idle", count: 0, next: "focus", lastDone: 0, id: null, pid: 0, track: null }, s && typeof s === "object" ? s : {});
 }
 
+// The running file is written before state.json, so a run interrupted in between never leaves a
+// "running" state without it (the waiter would exit at once and the session would never end).
 function saveState(s) {
-  writeJSON(statePath(), s);
-  if (s.status === "running") writeText(runningPath(), `${s.id} ${s.end}\n`);
-  else removeFile(runningPath());
+  if (s.status === "running") {
+    writeText(runningPath(), `${s.id} ${s.end}\n`);
+    writeJSON(statePath(), s);
+  } else {
+    writeJSON(statePath(), s);
+    removeFile(runningPath());
+  }
 }
 
 const isActive = (s) => s.status === "running" || s.status === "paused";
@@ -442,12 +462,14 @@ function completeLocked(s, fx) {
   return r;
 }
 
-// Repair state after a crash, reboot or sleep: finish an overdue session whose waiter is gone,
-// or restart the waiter if the session is still running. Caller holds the lock.
+// Finish an overdue session, whoever notices first (the waiter, a Script Filter or an action; it
+// only happens once because it runs under the lock), and restart a missing waiter after a crash
+// or reboot. Caller holds the lock.
 function reconcile(s, fx) {
-  if (s.status !== "running" || waiterAlive(s)) return;
+  if (s.status !== "running") return;
   if (now() >= s.end) completeLocked(s, fx);
-  else {
+  else if (!waiterAlive(s)) {
+    saveState(s); // restores the running file too
     s.pid = spawnWaiter(s.id);
     saveState(s);
   }
@@ -483,7 +505,7 @@ function complete(id) {
     if (s.status !== "running" || s.id !== id || now() < s.end) return;
     completeLocked(s, fx);
     done = true;
-  });
+  }, 20);
   if (done) runEffects(fx, true);
   return "";
 }
@@ -653,7 +675,7 @@ function startItem(s, kind, secs, label, primary) {
   let sub = kind === "focus" ? `Pomodoro ${(c.count % longEvery()) + 1} of ${longEvery()}` : `Then a focus session`;
   if (isActive(s)) sub = `Replaces the current ${KINDS[s.kind].name.toLowerCase()} · ${sub}`;
   else sub += ` · Ends at ${clockTime(now() + secs)}`;
-  return item(title, sub, k.icon, { a: "start", kind, secs, label, expect: isActive(s) ? s.id : "" }, { autocomplete: kind === "focus" ? "" : kind });
+  return item(title, sub, k.icon, { a: "start", kind, secs, label, expect: isActive(s) ? s.id : "" }, kind === "focus" ? {} : { autocomplete: kind });
 }
 
 function statusItems(s) {
@@ -715,7 +737,7 @@ function pomoItems(query) {
     else {
       const c = cycle(s);
       const order = [c.next, ...["focus", "short", "long"].filter((k) => k !== c.next)];
-      const first = startItem(s, order[0], lengthOf(order[0]), order[0] === "focus" ? "" : "", true);
+      const first = startItem(s, order[0], lengthOf(order[0]), "", true);
       if (s.status === "done" && !c.reset) {
         const doneK = KINDS[s.lastKind] ? KINDS[s.lastKind].name : "Session";
         first.subtitle = `${doneK} complete · ${first.subtitle}`;
@@ -779,10 +801,11 @@ function pomoItems(query) {
 // =====================================================================
 
 class ApiError extends Error {
-  constructor(title, subtitle, kind) {
+  constructor(title, subtitle, kind, status) {
     super(title);
     this.subtitle = subtitle || "";
     this.kind = kind || "api"; // api | auth | network | quota | token
+    this.status = status || 0;
   }
 }
 
@@ -829,7 +852,7 @@ function checkResponse(prov, r) {
   if (r.json && typeof r.json === "object") detail = r.json.message || r.json.error || "";
   else if (typeof r.json === "string") detail = r.json;
   else detail = r.text || "";
-  throw new ApiError(`${n} error ${r.status}`, oneLine(detail, 120), "api");
+  throw new ApiError(`${n} error ${r.status}`, oneLine(detail, 120), "api", r.status);
 }
 
 // Keychain: service = bundle id, account = provider. FT_KEYCHAIN_FILE (tests only) swaps in a file.
@@ -923,8 +946,15 @@ const Toggl = {
     if (!r.project && e.project) r.project = e.project;
     return r;
   },
+  // Returns false when the entry was already stopped (or deleted) elsewhere.
   stop(ctx, entry) {
-    call(ctx, "PATCH", `/workspaces/${enc(entry.ws || ctx.ws)}/time_entries/${enc(entry.id)}/stop`);
+    try {
+      call(ctx, "PATCH", `/workspaces/${enc(entry.ws || ctx.ws)}/time_entries/${enc(entry.id)}/stop`);
+      return true;
+    } catch (e) {
+      if (e instanceof ApiError && (e.status === 409 || e.status === 404)) return false;
+      throw e;
+    }
   },
 };
 
@@ -997,8 +1027,9 @@ const Clockify = {
   stop(ctx, entry) {
     // This endpoint stops whatever is running, so make sure it is still the entry we mean.
     const running = Clockify.entries(ctx).find((x) => x.running);
-    if (!running || running.id !== entry.id) return;
+    if (!running || running.id !== entry.id) return false;
     call(ctx, "PATCH", `/workspaces/${enc(entry.ws || ctx.ws)}/user/${enc(ctx.me.id)}/time-entries`, { end: isoUTC(now()) });
+    return true;
   },
 };
 
@@ -1006,6 +1037,7 @@ const PROVIDERS = { toggl: Toggl, clockify: Clockify };
 const provider = () => PROVIDERS[env("tracker", "none")] || null;
 
 const DAY = 86400;
+const ERROR_BACKOFF = 120;
 const ENTRY_TTL = () => Math.round(num("FT_ENTRY_TTL", 300, 0, 86400));
 
 // Cache files are per provider: <cache>/<provider>-<name>.json = { t, v }
@@ -1066,6 +1098,10 @@ function loadEntries(ctx) {
   const c = cacheRead(ctx, entriesName(ctx));
   if (c && now() - c.t < ENTRY_TTL() && now() >= c.t) return { entries: c.v, age: now() - c.t };
   if (c && !flag("FT_NO_BACKGROUND")) {
+    // After a failed refresh (offline, rate limit, quota) wait a while before trying again,
+    // or every rerun of the Script Filter would spend an API call.
+    const err = cacheRead(ctx, "error");
+    if (err && now() - err.t < ERROR_BACKOFF && now() >= err.t) return { entries: c.v, age: now() - c.t };
     spawnRefresh();
     return { entries: c.v, age: now() - c.t, refreshing: true };
   }
@@ -1183,7 +1219,7 @@ function trackItems(query) {
     return output(errorItems(prov, e));
   }
 
-  if (/^(workspaces?|ws)\b/.test(lower)) {
+  if (/^workspaces?(\s|$)/.test(lower)) {
     try {
       const list = cached(ctx, "workspaces", DAY, () => prov.workspaces(ctx));
       const f = norm(q.replace(/^\S+\s*/, ""));
@@ -1213,8 +1249,14 @@ function trackItems(query) {
     const pc = cacheRead(ctx, `projects-${ctx.ws}`);
     projects = pc ? pc.v : [];
   }
-  const tc = cacheRead(ctx, `tags-${ctx.ws}`);
-  tags = tc ? tc.v : [];
+  if (/(^|\s)#\S/.test(q)) {
+    try {
+      tags = cached(ctx, `tags-${ctx.ws}`, DAY, () => prov.tags(ctx));
+    } catch (e) {
+      const tc = cacheRead(ctx, `tags-${ctx.ws}`);
+      tags = tc ? tc.v : [];
+    }
+  }
   const bgError = cacheRead(ctx, "error");
   if (bgError && !items.length) items.push(item(bgError.v.title, `Showing saved entries · ${bgError.v.subtitle}`, bgError.v.kind === "auth" ? "key" : "error", bgError.v.kind === "auth" ? { a: "token-set" } : null));
 
@@ -1366,7 +1408,7 @@ function trackAction(a) {
       case "track-stop": {
         const ctx = context(prov);
         const cachedEntry = (cacheRead(ctx, entriesName(ctx)) || { v: [] }).v.find((e) => String(e.id) === String(a.id));
-        prov.stop(ctx, { id: a.id, ws: a.ws });
+        const stopped = prov.stop(ctx, { id: a.id, ws: a.ws });
         cacheAfterStop(ctx, a.id);
         // A Pomodoro that started this entry no longer owns it.
         withLock(() => {
@@ -1376,6 +1418,7 @@ function trackAction(a) {
             saveState(s);
           }
         });
+        if (!stopped) return `“${oneLine(a.description, 60) || "timer"}” was already stopped.`;
         const el = cachedEntry && cachedEntry.start ? ` after ${fmtClock(now() - cachedEntry.start)}` : "";
         return `Stopped “${oneLine(a.description, 60) || "timer"}”${el}.`;
       }
@@ -1446,9 +1489,9 @@ function trackerStopOwned(track) {
   if (!prov) return "";
   try {
     const ctx = context(prov);
-    prov.stop(ctx, { id: track.id, ws: track.ws });
+    const stopped = prov.stop(ctx, { id: track.id, ws: track.ws });
     cacheAfterStop(ctx, track.id);
-    return `Stopped the ${prov.short} timer.`;
+    return stopped ? `Stopped the ${prov.short} timer.` : "";
   } catch (e) {
     if (!(e instanceof ApiError)) throw e;
     return `${prov.short}: ${e.message}.`;

@@ -287,7 +287,7 @@ class PomodoroTests(Base):
         it = self.sf("pomo", focus_minutes="50", short_minutes="abc", daily_goal="0")
         self.assertEqual(it[0]["title"], "Start Focus · 50 min")
         self.assertEqual(it[1]["title"], "Start Short Break · 5 min")
-        self.assertEqual(it[3]["title"], "Today: 0 pomodoros · 0 s")
+        self.assertEqual(it[3]["title"], "Today: 0 pomodoros · 0 min")
 
     def test_durations_and_labels(self):
         cases = {"50": (3000, ""), "1h30": (5400, ""), "1h 30m": (5400, ""), "1 h 30": (5400, ""), "90s": (90, ""),
@@ -458,6 +458,53 @@ class PomodoroTests(Base):
         self.assertTrue(it[0]["title"].startswith("Start Focus"))
         self.assertEqual(self.sf("pomo", "stats")[0]["title"], "Today: 1 pomodoro · 25 min focused")
 
+    # --- audit pass 1 regressions ---
+
+    def test_lock_left_by_a_killed_script_filter_is_taken_over(self):
+        dead = subprocess.Popen(["true"])
+        dead.wait()
+        os.makedirs(os.path.join(self.data, "lock"))
+        with open(os.path.join(self.data, "lock", "pid"), "w") as f:
+            f.write(str(dead.pid))
+        t = time.time()
+        self.assertIn("Focus started", self.start())
+        self.assertLess(time.time() - t, 3)
+
+    def test_lock_with_a_reused_pid_is_taken_over(self):
+        other = subprocess.Popen(["sleep", "30"])
+        try:
+            os.makedirs(os.path.join(self.data, "lock"))
+            with open(os.path.join(self.data, "lock", "pid"), "w") as f:
+                f.write(str(other.pid))
+            self.assertIn("Focus started", self.start())
+        finally:
+            other.kill()
+            other.wait()
+
+    def test_lock_held_by_a_live_owner_waits(self):
+        holder = subprocess.Popen(["/bin/bash", "-c", "sleep 30; true", "focus.js"])
+        time.sleep(0.2)
+        try:
+            os.makedirs(os.path.join(self.data, "lock"))
+            with open(os.path.join(self.data, "lock", "pid"), "w") as f:
+                f.write(str(holder.pid))
+            self.assertIn("busy", self.start(FT_LOCK_TIMEOUT="0.5"))
+            self.assertIn("busy", self.sf("pomo", FT_LOCK_TIMEOUT="0.5")[0]["subtitle"])
+        finally:
+            holder.kill()
+            holder.wait()
+
+    def test_pause_at_the_end_completes_instead(self):
+        self.start()
+        sid = self.state()["id"]
+        self.assertEqual(self.act({"a": "pause", "id": sid}, T0 + 1500), "That timer has already ended. Focus complete. Time for a short break.")
+        self.assertEqual(self.state()["status"], "done")
+        self.assertEqual(len(self.sessions()), 1)
+
+    def test_durations_round_to_hours(self):
+        self.start(secs=7200)
+        self.assertIn("stopped after 1 h.", self.act({"a": "stop", "id": self.state()["id"]}, T0 + 3570))
+
     def test_stale_lock_is_recovered(self):
         os.makedirs(os.path.join(self.data, "lock"))
         old = time.time() - 60
@@ -549,6 +596,25 @@ class WaiterTests(Base):
         time.sleep(2.5)
         self.assertEqual(self.state()["status"], "running")
         self.assertTrue(self.wait_for(lambda: self.state()["status"] == "done", 6))
+
+    def test_overdue_session_completes_once_with_a_live_waiter(self):
+        self.act({"a": "start", "kind": "focus", "secs": 60, "label": "", "expect": ""})
+        self.assertEqual(len(self.waiters()), 1)
+        self.sf("pomo", now=int(time.time()) + 61)
+        self.assertEqual(self.state()["status"], "done")
+        self.assertTrue(self.wait_for(lambda: not self.waiters(), 5))
+        self.assertEqual(len(self.sessions()), 1)
+        self.assertEqual(sum(f.startswith("trigger:notify:") for f in self.effects()), 1)
+
+    def test_missing_running_file_is_restored(self):
+        # a run killed between writing state.json and the running file
+        self.act({"a": "start", "kind": "focus", "secs": 60, "label": "", "expect": ""})
+        subprocess.run(["pkill", "-f", f"waiter.sh .* {self.data}"])
+        os.remove(os.path.join(self.data, "running"))
+        self.sf("pomo")
+        self.assertTrue(os.path.exists(os.path.join(self.data, "running")))
+        time.sleep(1.5)
+        self.assertEqual(len(self.waiters()), 1)
 
     def test_stale_pid_after_reboot(self):
         # A PID recorded before a reboot may now belong to an unrelated process: it must not be
@@ -655,7 +721,7 @@ class TogglTests(TrackBase):
         start = it[0]
         self.assertEqual(start["title"], "Start “Fix the “login” bug”")
         a = self.arg(start)
-        self.assertEqual((a["projectId"], a["tags"]), (101, ["deep_work", "new"]))
+        self.assertEqual((a["projectId"], a["tags"]), (101, ["Deep Work", "new"]))
         msg = self.act(a)
         self.assertIn("Started “Fix the “login” bug” in Toggl.", msg)
         body = MOCK.requests[-1]["body"]
@@ -676,10 +742,38 @@ class TogglTests(TrackBase):
         self.assertEqual(self.sf("track", now=T0 + 31)[0]["title"], "Nothing is being tracked")
 
     def test_known_tag_names_are_reused(self):
-        self.sf("track", "x")  # warm the caches
-        self.act(self.arg(self.sf("track", "y")[0]))
-        # tags are only cached by Clockify; for Toggl the literal names are sent
-        self.assertEqual(MOCK.requests[-1]["body"]["tags"], [])
+        a = self.arg(self.sf("track", "Draft #deep_work #WRITING #brand-new")[0])
+        self.assertEqual(a["tags"], ["Deep Work", "writing", "brand-new"])
+        self.act(a)
+        self.assertEqual(MOCK.requests[-1]["body"]["tags"], ["Deep Work", "writing", "brand-new"])
+        self.assertEqual(sum(r["path"].endswith("/tags") for r in MOCK.requests), 1)
+
+    def test_workspace_word_in_a_description(self):
+        self.assertEqual(self.sf("track", "ws review")[0]["title"], "Start “ws review”")
+
+    def test_stopping_an_entry_stopped_elsewhere(self):
+        self.assertEqual(self.act({"a": "track-stop", "id": 1, "ws": 11, "description": "Writing docs"}), "“Writing docs” was already stopped.")
+
+    def test_linked_entry_stopped_elsewhere(self):
+        self.act(self.arg(self.sf("track", "Deep dive")[0], "cmd"))
+        MOCK.toggl_entries[0]["duration"] = 60
+        msg = self.act({"a": "stop", "id": self.state()["id"]}, T0 + 60)
+        self.assertEqual(msg, "Focus stopped after 1 min.")
+
+    def test_failed_refresh_backs_off(self):
+        self.sf("track")
+        MOCK.force = (429, "")
+        env = {"FT_NO_BACKGROUND": "0"}
+        self.sf("track", now=T0 + 3600, **env)
+        err = os.path.join(self.cache, "toggl-error.json")
+        self.assertTrue(self.wait_for(lambda: os.path.exists(err)))
+        self.assertTrue(self.wait_for(lambda: not os.path.exists(os.path.join(self.data, "refresh.lock")), 5))
+        n = len(MOCK.requests)
+        data = self.sf("track", now=T0 + 3601, full=True, **env)
+        self.assertEqual(data["items"][0]["title"], "Too many requests to Toggl Track")
+        self.assertNotIn("rerun", data)
+        time.sleep(1)
+        self.assertEqual(len(MOCK.requests), n)
 
     def test_project_picker(self):
         it = self.sf("track", "writing @web")
