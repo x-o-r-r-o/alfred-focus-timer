@@ -7,6 +7,7 @@
 //   complete <id>      called by waiter.sh when a session reaches its end time
 //   track-refresh      background refresh of the time-entry cache
 ObjC.import("Foundation");
+ObjC.import("AppKit"); // NSPasteboard: save an API key from the clipboard, then clear it
 
 const ENV = $.NSProcessInfo.processInfo.environment;
 function env(name, fallback) {
@@ -19,7 +20,7 @@ const BUNDLE = env("alfred_workflow_bundleid", REAL_BUNDLE);
 const ALFRED = "com.runningwithcrayons.Alfred";
 // Test mode (any test override is set): never reach real services, the real Keychain item, Alfred,
 // Finder or the browser, even if a test forgets one of the overrides.
-const TEST_MODE = ["FT_TEST_LOG", "FT_NOW", "FT_KEYCHAIN_FILE", "FT_KEYCHAIN_SERVICE", "FT_TOGGL_URL", "FT_CLOCKIFY_URL", "FT_TOKEN_INPUT"]
+const TEST_MODE = ["FT_TEST_LOG", "FT_NOW", "FT_KEYCHAIN_FILE", "FT_KEYCHAIN_SERVICE", "FT_TOGGL_URL", "FT_CLOCKIFY_URL", "FT_TEST_CLIPBOARD"]
   .some((k) => env(k, "") !== "");
 // Lookup tables keyed by user-controlled strings have no prototype ("constructor", "__proto__").
 const table = (o) => Object.assign(Object.create(null), o);
@@ -979,8 +980,8 @@ function checkResponse(prov, r, path) {
   if (r.status >= 200 && r.status < 300) return r.json;
   // A bad token is a 401 (Clockify) or a 403 (Toggl). Any other 403 is a permission problem, such
   // as a workspace where you can't create tags, so it isn't reported as a bad token.
-  if (r.status === 401 || (r.status === 403 && /^\/(me|user)$/.test(path || ""))) throw new ApiError(`${n} rejected the API token`, "Press ↩ to set a new token", "auth", r.status);
-  if (r.status === 403) throw new ApiError(`${n} refused the request (403)`, "Check your access to this workspace, or press ↩ to set a new token", "auth", r.status);
+  if (r.status === 401 || (r.status === 403 && /^\/(me|user)$/.test(path || ""))) throw Object.assign(new ApiError(`${n} rejected your API key`, `Save a new one via “${keyCommand()}”`, "auth", r.status), { badKey: true });
+  if (r.status === 403) throw new ApiError(`${n} refused the request (403)`, `Check your access to this workspace, or save a new API key via “${keyCommand()}”`, "auth", r.status);
   // Toggl answers 402 when the hourly quota of your plan is used up (30 requests on the free plan),
   // with the seconds until it resets in a header. A 402 without quota headers is a paid feature.
   const h = r.headers || {};
@@ -1015,20 +1016,21 @@ function getToken(acct) {
   return r.status === 0 ? r.out.trim() : "";
 }
 
+// Returns whether the key is now in the Keychain (the caller has validated it with TOKEN_RE).
 function setToken(acct, token) {
-  if (!TOKEN_RE.test(token) || !/^[\w.-]+$/.test(KC_SERVICE)) throw new ApiError("That doesn't look like an API token", "Copy it again from your profile page", "token");
+  if (!TOKEN_RE.test(token) || !/^[\w.-]+$/.test(KC_SERVICE)) return false;
   const f = env("FT_KEYCHAIN_FILE", "");
   if (f) {
     const all = readJSON(f, {});
     all[acct] = token;
     writeJSON(f, all);
-    return;
+    return true;
   }
-  if (KC_BLOCKED) throw new ApiError("Test mode: the real Keychain item is off limits", "", "token");
+  if (KC_BLOCKED) return false; // test mode: the real Keychain item is off limits
   // `security -i` reads the command from stdin, so the token is never a process argument.
   // Both values were validated above, so they cannot break out of the quotes.
   exec("/usr/bin/security", ["-i"], `add-generic-password -U -s "${KC_SERVICE}" -a "${acct}" -l "Focus Timer (${acct})" -w "${token}"\n`);
-  if (getToken(acct) !== token) throw new ApiError("Couldn't save the token in the Keychain", "", "token");
+  return getToken(acct) === token;
 }
 
 function deleteToken(acct) {
@@ -1260,7 +1262,7 @@ function trackSettings() {
 // sf: called from a Script Filter (failed GET requests are then paused for a moment, see call()).
 function context(prov, sf) {
   const token = getToken(prov.key);
-  if (!token) throw new ApiError(`Set your ${prov.name} API token`, prov.tokenHelp, "token");
+  if (!token) throw new ApiError(`Set your ${prov.name} API key`, `Save it via “${keyCommand()}”`, "token");
   const ctx = { prov, token, sf: !!sf };
   ctx.me = cached(ctx, "me", DAY, () => prov.me(ctx), (v) => (isObj(v) ? v : null));
   const sel = isObj(trackSettings()[prov.key]) ? trackSettings()[prov.key] : {};
@@ -1376,25 +1378,75 @@ function entryLine(e) {
 const retryable = (e) => e.kind === "network" || e.status >= 500;
 
 function errorItems(prov, e) {
-  const items = [];
-  if (e.kind === "auth" || e.kind === "token") {
-    items.push(item(e.message, e.subtitle, "key", { a: "token-set" }, {
-      mods: { cmd: mod(`Open the ${prov.name} page with your token`, { a: "open", url: prov.tokenURL }) },
-    }));
-  } else if (retryable(e)) {
-    items.push(item(e.message, `${e.subtitle} · ↩ Try again`, "error", { a: "track-refresh" }));
-  } else {
-    items.push(item(e.message, e.subtitle, "error"));
-  }
+  if (e.kind === "auth" || e.kind === "token") return setKeyItems(prov, e);
+  if (retryable(e)) return [item(e.message, `${e.subtitle} · ↩ Try again`, "error", { a: "track-refresh" })];
+  return [item(e.message, e.subtitle, "error")];
+}
+
+// ---------- API key rows ----------
+// The same rows, wording and icons as the other x-o-r-r-o workflows: `track apikey` offers
+// "Save API key from clipboard", "Save typed API key", "Remove the saved API key" and
+// "Get an API key…". The key travels in an item variable (ft_new_key), never in an arg (which
+// reaches the action's argv), a title, Copy/Large Type (masked), a log or the cache.
+
+function keyCommand() {
+  return `${String(env("keyword_track", "track")).trim() || "track"} apikey`;
+}
+const maskKey = (k) => `••••${k.slice(-4)}`;
+// A clipboard worth offering as a key: one long word with letters and digits (not a URL)
+const plausibleKey = (k) => TOKEN_RE.test(k) && k.length >= 20 && /\d/.test(k) && /[A-Za-z]/.test(k) && !/:\/\//.test(k);
+
+function clipboardText() {
+  const fake = env("FT_TEST_CLIPBOARD", null);
+  if (fake !== null) return fake.trim();
+  if (TEST_MODE) return "";
+  const s = $.NSPasteboard.generalPasteboard.stringForType($.NSPasteboardTypeString);
+  return s.isNil() ? "" : s.js.trim();
+}
+// After a key is saved from the clipboard, clear the clipboard if it still holds that key.
+function clearClipboardIf(text) {
+  if (clipboardText() !== text) return;
+  if (testLog(`clear-clipboard:${text.length}`)) return;
+  $.NSPasteboard.generalPasteboard.clearContents;
+}
+
+// A missing or rejected key in a notification: point to `track apikey`, like the other workflows
+function keyErrorNote(prov, e) {
+  if (e.kind === "token") return `Set your ${prov.name} API key via “${keyCommand()}”.`;
+  if (e.kind === "auth") return `${e.message}. ${e.subtitle}.`;
+  return "";
+}
+
+function saveKeyItem(source, key) {
+  const masked = maskKey(key);
+  const typed = source === "typed";
+  return item(typed ? "Save typed API key" : "Save API key from clipboard",
+    typed ? `${masked} · Typed keys are briefly visible to other processes: the clipboard is safer` : `${masked} · Stored in your macOS Keychain`,
+    "key", { a: "key-save", source }, { variables: { ft_new_key: key }, text: { copy: masked, largetype: masked } });
+}
+function getKeyItem(prov) {
+  return item("Get an API key…", `Opens ${prov.name}’s API key page · Copy the key, then type “${keyCommand()}”`, "key-get", { a: "open", url: prov.tokenURL });
+}
+
+// A missing or rejected key, wherever it shows up: point to `track apikey`.
+function setKeyItems(prov, e) {
+  const items = [item(e.message, e.subtitle, e.kind === "token" ? "key" : "error", null, { autocomplete: "apikey " })];
+  const clip = clipboardText();
+  if (plausibleKey(clip) && clip !== getToken(prov.key)) items.push(saveKeyItem("clipboard", clip));
+  items.push(getKeyItem(prov));
   return items;
 }
 
-function tokenItems(prov) {
-  const has = !!getToken(prov.key);
-  const items = [item(has ? `Replace the ${prov.name} API token` : `Set your ${prov.name} API token`, `${prov.tokenHelp} · ⌘↩ Open that page`, "key", { a: "token-set" }, {
-    mods: { cmd: mod(`Open the ${prov.name} page with your token`, { a: "open", url: prov.tokenURL }) },
-  })];
-  if (has) items.push(item("Remove the saved token", "Deletes it from the Keychain", "stop", { a: "token-remove" }));
+function keyItems(prov, typed) {
+  const items = [];
+  const clip = clipboardText();
+  if (plausibleKey(clip)) items.push(saveKeyItem("clipboard", clip));
+  if (typed && typed !== clip) {
+    if (TOKEN_RE.test(typed)) items.push(saveKeyItem("typed", typed));
+    else items.push(item(`That doesn’t look like a ${prov.name} API key`, prov.tokenHelp, "error"));
+  }
+  if (getToken(prov.key)) items.push(item("Remove the saved API key", "Deletes it from your macOS Keychain", "key-remove", { a: "key-remove" }));
+  items.push(getKeyItem(prov));
   return items;
 }
 
@@ -1405,7 +1457,9 @@ function trackItems(query) {
     return output([item("Choose Toggl Track or Clockify", "Set the time tracking service in the Workflow’s Configuration", "info")]);
   }
   const lower = q.toLowerCase();
-  if (lower === "token" || lower === "api token") return output(tokenItems(prov));
+  // “apikey” as the exact first word (any case); “:key”, and “token” / “api token” (v1.0), are aliases
+  const ak = /^(?:apikey|:key)(?:\s+(.*))?$/i.exec(q);
+  if (ak || lower === "token" || lower === "api token") return output(keyItems(prov, ak ? (ak[1] || "").trim() : ""));
 
   let ctx;
   try {
@@ -1467,7 +1521,7 @@ function trackItems(query) {
     const be = bgError.v, auth = be.kind === "auth";
     const retry = !auth && retryable({ kind: be.kind, status: Number(be.status) || 0 });
     items.push(item(String(be.title || "Couldn't refresh"), `Showing saved entries · ${String(be.subtitle || "")}${retry ? " · ↩ Try again" : ""}`,
-      auth ? "key" : "error", auth ? { a: "token-set" } : retry ? { a: "track-refresh" } : null));
+      "error", retry ? { a: "track-refresh" } : null, auth ? { autocomplete: "apikey " } : {}));
   }
 
   const running = entries.find((e) => e.running);
@@ -1517,7 +1571,7 @@ function trackItems(query) {
     items.push(item(`Workspace${ctx.wsName ? `: ${ctx.wsName}` : ""}`, `Choose the ${prov.name} workspace`, "workspace", null, { autocomplete: "workspace " }));
     const when = refreshing ? "Refreshing…" : age < 60 ? "Updated just now" : `Updated ${fmtDur(age)} ago`;
     items.push(item(`Refresh from ${prov.name}`, `${when} · Signed in as ${ctx.me.name}`, "refresh", { a: "track-refresh" }));
-    items.push(...tokenItems(prov).slice(0, 1));
+    items.push(item("API key", `Save or remove your ${prov.name} API key`, "key", null, { autocomplete: "apikey " }));
     return output(items, { rerun });
   }
 
@@ -1645,20 +1699,26 @@ function trackAction(a) {
   if (!prov) return "Choose Toggl Track or Clockify in the Workflow’s Configuration.";
   try {
     switch (a.a) {
-      case "token-set": {
-        let token = env("FT_TOKEN_INPUT", null);
-        if (token === null) token = askToken(prov);
-        token = String(token || "").trim();
-        if (!token) return "";
-        setToken(prov.key, token);
+      case "key-save": {
+        // The key comes from the item's variables, never from the arg (which reaches argv)
+        const key = String(env("ft_new_key", "")).trim();
+        if (!TOKEN_RE.test(key)) return `Couldn’t save the API key: it doesn’t look like a ${prov.name} API key`;
+        if (!setToken(prov.key, key)) return "Couldn’t save the API key: the Keychain refused it";
+        if (a.source === "clipboard") clearClipboardIf(key);
         clearCache(prov);
-        const ctx = context(prov);
-        return `Connected to ${prov.name}${ctx.me.name ? ` as ${ctx.me.name}` : ""}.`;
+        try {
+          context(prov);
+        } catch (e) {
+          if (e instanceof ApiError && e.badKey) return `API key saved, but ${prov.name} rejected it`;
+        }
+        return "API key saved";
       }
-      case "token-remove":
+      case "key-remove":
+        if (!getToken(prov.key)) return "Couldn’t remove the API key: none is saved";
         deleteToken(prov.key);
+        if (getToken(prov.key)) return "Couldn’t remove the API key: the Keychain refused it";
         clearCache(prov);
-        return `Removed the ${prov.name} token.`;
+        return "API key removed";
       case "open":
         if (a.url === prov.tokenURL) openURL([a.url]);
         return "";
@@ -1708,24 +1768,9 @@ function trackAction(a) {
     }
   } catch (e) {
     if (!(e instanceof ApiError)) throw e;
-    return `${e.message}. ${e.subtitle}`.trim();
+    return keyErrorNote(prov, e) || `${e.message}. ${e.subtitle}`.trim();
   }
   return "";
-}
-
-function askToken(prov) {
-  if (testLog("dialog:token")) return "";
-  const app = Application.currentApplication();
-  app.includeStandardAdditions = true;
-  try {
-    app.activate();
-    const r = app.displayDialog(`Paste your ${prov.name} API token.\n${prov.tokenHelp}.\nIt is stored in your macOS Keychain.`, {
-      defaultAnswer: "", hiddenAnswer: true, buttons: ["Cancel", "Save"], defaultButton: "Save", cancelButton: "Cancel", withTitle: "Focus Timer",
-    });
-    return r.textReturned;
-  } catch (e) {
-    return ""; // cancelled
-  }
 }
 
 // ----- Pomodoro ↔ tracker link -----
@@ -1758,7 +1803,7 @@ function trackerStartForFocus(f) {
     return owned ? `Tracking in ${prov.short}.` : "";
   } catch (e) {
     if (!(e instanceof ApiError)) throw e;
-    return `${prov.short}: ${e.message}.`;
+    return keyErrorNote(prov, e) || `${prov.short}: ${e.message}.`;
   }
 }
 
@@ -1773,7 +1818,7 @@ function trackerStopOwned(track) {
     return stopped ? `Stopped the ${prov.short} timer.` : "";
   } catch (e) {
     if (!(e instanceof ApiError)) throw e;
-    return `${prov.short}: ${e.message}.`;
+    return keyErrorNote(prov, e) || `${prov.short}: ${e.message}.`;
   }
 }
 

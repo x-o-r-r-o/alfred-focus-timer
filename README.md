@@ -29,7 +29,11 @@ Choose Toggl Track or Clockify in the Workflow’s Configuration, then start a t
 * <kbd>↩</kbd> Start the timer, restart a recent entry, or stop the running timer.
 * <kbd>⌘</kbd><kbd>↩</kbd> Start the timer together with a Pomodoro focus session; the timer stops when the session ends.
 
-The first time, press <kbd>↩</kbd> to paste your API token, or <kbd>⌘</kbd><kbd>↩</kbd> to open the page where you find it. It is stored in your macOS Keychain. Type `track workspace` to change the workspace and `track token` to replace the token.
+The first time, save your Toggl Track or Clockify API key (Toggl calls it an API token) via `track apikey`: copy the key and press <kbd>↩</kbd> on “Save API key from clipboard”, or type it after `apikey`. The key is stored in your macOS Keychain, and the clipboard is cleared once it’s saved. “Get an API key…” opens the page where you create one, and “Remove the saved API key” deletes it.
+
+![Saving the API key](images/key.png)
+
+Type `track workspace` to change the workspace.
 
 See the time tracked today and this week, in total and by project, by typing `report` via the `track` keyword.
 

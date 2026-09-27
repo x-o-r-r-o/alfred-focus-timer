@@ -16,7 +16,9 @@
   "project": ["folder.fill", "#9333EA"],
   "workspace": ["building.2.fill", "#475569"],
   "refresh": ["arrow.clockwise", "#0891B2"],
-  "key": ["key.horizontal.fill", "#CA8A04"],
+  "key": ["key.horizontal.fill", "#D97706"],
+  "key-remove": ["trash.fill", "#DC2626"],
+  "key-get": ["arrow.up.forward.square.fill", "#2563EB"],
   "info": ["info.circle.fill", "#64748B"],
   "error": ["exclamationmark.triangle.fill", "#DC2626"]
 }

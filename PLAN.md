@@ -21,13 +21,14 @@ Raycast demand this workflow replaces (downloads, 2026-09-26):
 - [x] Background waiter (wall-clock, sleep/wake safe, PID-checked, recovers after reboot); live countdown with `rerun`
 - [x] `pomo stats` today/week/month, daily goal, streak and best streak (DST-safe, locale week start); JSON-lines session log
 - [x] `track <desc> @project #tag` start/stop Toggl Track (v9) or Clockify (v1, regions) timer, pick project/workspace, restart recent entries, Universal Action
-- [x] Token in the Keychain via a hidden-input dialog (`security -i`, never in argv); 401/402/403/429/offline handled; cached with background refresh and back-off
+- [x] Token in the Keychain (`security -i`, never in argv); 401/402/403/429/offline handled; cached with background refresh and back-off. v1.0 used a hidden-input dialog; v1.1.0 replaces it with the shared `track apikey` rows
 - [x] Link a pomodoro to a time-tracking entry automatically (config) or per entry (⌘↩)
 
 ## Features (v1.1, round-4 audit)
 - [x] Recent custom focus sessions (label or non-default length) in the `pomo` menu; typing part of a label finds them (Raycast Pomodoro requests for several interval lengths, raycast/extensions#28699, #17949)
 - [x] `track report`: time tracked today and this week, in total and by project (Raycast Toggl Track request raycast/extensions#25258)
 - [x] Default project for new timers and Pomodoro tracking (Raycast Toggl Track request raycast/extensions#25076)
+- [x] v1.1.0: one API-key flow shared with Linear, Stocks and Local AI: `track apikey` (`track :key`, `track token` and `track api token` still work) offers “Save API key from clipboard” (new; clears the clipboard afterwards), “Save typed API key”, “Remove the saved API key” and “Get an API key…”; missing and rejected keys point to `track apikey`. The hidden-input dialog is gone: the clipboard route keeps the key out of Alfred’s search field, and a typed key is briefly visible in the Script Filter’s argv (the row says so)
 
 ## Tech
 - **Stack:** bash + JXA; background timer via a `launchd`-free detached waiter (`src/waiter.sh`) + Alfred External Triggers for notifications.
@@ -55,7 +56,7 @@ Raycast demand this workflow replaces (downloads, 2026-09-26):
 ## Verify in real Alfred
 - [ ] Notifications from the background timer (External Trigger → Post Notification) appear, including when Alfred is closed, and the sound plays.
 - [ ] `osascript` → Alfred `run trigger` doesn't raise an Automation permission prompt (or the prompt is understandable).
-- [ ] The token dialog (hidden input) comes to the front when started from Alfred, and Cancel does nothing.
+- [ ] `track apikey`: “Save API key from clipboard” saves the key and clears the clipboard; the “API key saved” notification appears.
 - [ ] A running session survives quitting Alfred and a sleep/wake cycle; after a reboot, it catches up the next time `pomo` opens.
 - [ ] The Shortcuts start/end hooks run a real Shortcut, and a wrong name produces the notification.
 - [ ] The live countdown (`rerun`) updates every second without flicker; typing while it runs is not slowed down.

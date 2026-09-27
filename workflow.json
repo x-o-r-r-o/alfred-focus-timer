@@ -224,7 +224,7 @@
       "type": "popupbutton",
       "variable": "tracker",
       "label": "Time tracking",
-      "description": "Your API token is stored in the Keychain: set it via the track keyword",
+      "description": "Your API key (API token) is stored in the Keychain: save it via “track apikey”",
       "config": {
         "default": "none",
         "pairs": [

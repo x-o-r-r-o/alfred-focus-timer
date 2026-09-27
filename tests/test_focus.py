@@ -957,13 +957,19 @@ class TogglTests(TrackBase):
         self.assertEqual(self.sf("track", tracker="none")[0]["title"], "Choose Toggl Track or Clockify")
         os.remove(self.keys)
         it = self.sf("track")
-        self.assertEqual(it[0]["title"], "Set your Toggl Track API token")
-        self.assertEqual(self.arg(it[0]), {"a": "token-set"})
-        self.assertEqual(self.arg(it[0], "cmd")["url"], "https://track.toggl.com/profile")
+        self.assertEqual([i["title"] for i in it], ["Set your Toggl Track API key", "Get an API key…"])
+        self.assertEqual(it[0]["subtitle"], "Save it via “track apikey”")
+        self.assertEqual((it[0]["valid"], it[0]["autocomplete"]), (False, "apikey "))
+        self.assertEqual(self.arg(it[1]), {"a": "open", "url": "https://track.toggl.com/profile"})
         self.assertEqual(MOCK.requests, [])
-        self.assertIn("doesn't look like", self.act({"a": "token-set"}, FT_TOKEN_INPUT='bad token"; rm -rf ~'))
-        self.assertIn("Connected to Toggl Track as Ada Lovelace", self.act({"a": "token-set"}, FT_TOKEN_INPUT=TOGGL_TOKEN))
+        it = self.sf("track", "anything", FT_TEST_CLIPBOARD=TOGGL_TOKEN)
+        self.assertEqual([i["title"] for i in it], ["Set your Toggl Track API key", "Save API key from clipboard", "Get an API key…"])
+        self.assertEqual(self.act({"a": "key-save", "source": "typed"}, ft_new_key='bad token"; rm -rf ~'),
+                         "Couldn’t save the API key: it doesn’t look like a Toggl Track API key")
+        self.assertEqual(self.act({"a": "key-save", "source": "typed"}, ft_new_key=TOGGL_TOKEN), "API key saved")
         self.assertEqual(self.keychain()["toggl"], TOGGL_TOKEN)
+        self.assertEqual(self.act({"a": "track-start", "description": "x", "tags": []}, FT_KEYCHAIN_FILE=self.keys + ".none"),
+                         "Set your Toggl Track API key via “track apikey”.")
 
     def test_list_running_recent(self):
         MOCK.toggl_entries.insert(0, {"id": 9, "workspace_id": 11, "description": "Café ☕️ planning", "project_id": 103,
@@ -1045,13 +1051,13 @@ class TogglTests(TrackBase):
         MOCK.force = (403, {"message": "No access"})
         shutil.rmtree(self.cache)
         it = self.sf("track")
-        self.assertEqual(it[0]["title"], "Toggl Track rejected the API token")  # /me: bad token
+        self.assertEqual(it[0]["title"], "Toggl Track rejected your API key")  # /me: bad token
         MOCK.force = None
         self.sf("track", now=T0 + 20)  # after the pause that follows a failed request
         MOCK.force = (403, {"message": "No access"})
         it = self.sf("track", now=T0 + 3600)  # stale entries, /me still cached
         self.assertEqual(it[0]["title"], "Toggl Track refused the request (403)")
-        self.assertEqual(self.arg(it[0]), {"a": "token-set"})
+        self.assertEqual(it[0]["autocomplete"], "apikey ")
 
     def test_cmd_warns_about_replacing_a_pomodoro(self):
         self.assertNotIn("replaces", self.sf("track", "Docs")[0]["mods"]["cmd"]["subtitle"])
@@ -1099,7 +1105,7 @@ class TogglTests(TrackBase):
         self.assertEqual(it[0]["title"], "Start @ Café Opening")
 
     def test_errors(self):
-        for status, body, title in [(401, "", "Toggl Track rejected the API token"), (402, "Requires a paid plan", "Toggl Track error 402"),
+        for status, body, title in [(401, "", "Toggl Track rejected your API key"), (402, "Requires a paid plan", "Toggl Track error 402"),
                                     (429, "", "Too many requests to Toggl Track"), (500, "", "Toggl Track is having problems (500)"),
                                     (400, "Invalid project_id", "Toggl Track error 400")]:
             MOCK.reset()
@@ -1110,7 +1116,8 @@ class TogglTests(TrackBase):
                 self.assertEqual(it[0]["subtitle"], "Requires a paid plan")  # a paid feature, not the quota
             self.assertEqual(it[0]["title"], title)
             if status == 401:
-                self.assertEqual(self.arg(it[0]), {"a": "token-set"})
+                self.assertEqual((it[0]["subtitle"], it[0]["valid"], it[0]["autocomplete"]), ("Save a new one via “track apikey”", False, "apikey "))
+                self.assertEqual(it[-1]["title"], "Get an API key…")
             if status == 400:
                 self.assertEqual(it[0]["subtitle"], "Invalid project_id")
         shutil.rmtree(self.cache, ignore_errors=True)
@@ -1233,11 +1240,68 @@ class TogglTests(TrackBase):
         self.assertEqual(it[0]["title"], "Start “Review PR from Jane”")
         self.assertEqual(self.arg(it[0])["tags"], ["123"])
 
-    def test_token_items(self):
-        it = self.sf("track", "token")
-        self.assertEqual([i["title"] for i in it], ["Replace the Toggl Track API token", "Remove the saved token"])
-        self.assertIn("Removed", self.act(self.arg(it[1])))
+    def test_key_rows_order_and_aliases(self):
+        other = "fedcba9876543210fedcba9876543210"
+        it = self.sf("track", f"apikey {other}", FT_TEST_CLIPBOARD=TOGGL_TOKEN)
+        self.assertEqual([i["title"] for i in it], ["Save API key from clipboard", "Save typed API key", "Remove the saved API key", "Get an API key…"])
+        self.assertEqual([i["icon"]["path"] for i in it], ["icons/key.png", "icons/key.png", "icons/key-remove.png", "icons/key-get.png"])
+        self.assertEqual(it[0]["subtitle"], "••••cdef · Stored in your macOS Keychain")
+        self.assertEqual(it[1]["subtitle"], "••••3210 · Typed keys are briefly visible to other processes: the clipboard is safer")
+        self.assertEqual(it[2]["subtitle"], "Deletes it from your macOS Keychain")
+        self.assertEqual(it[3]["subtitle"], "Opens Toggl Track’s API key page · Copy the key, then type “track apikey”")
+        self.assertEqual((it[0]["variables"], it[1]["variables"]), ({"ft_new_key": TOGGL_TOKEN}, {"ft_new_key": other}))
+        self.assertEqual(it[1]["text"], {"copy": "••••3210", "largetype": "••••3210"})
+        for row in it:
+            self.assertNotIn(other, json.dumps({k: v for k, v in row.items() if k != "variables"}))
+            self.assertNotIn(TOGGL_TOKEN, json.dumps({k: v for k, v in row.items() if k != "variables"}))
+        for q in ("apikey", "APIKEY", "ApiKey", ":key", ":KEY", "token", "api token", "Token"):
+            self.assertEqual([i["title"] for i in self.sf("track", q)], ["Remove the saved API key", "Get an API key…"], q)
+        for q in ("apikey", ":key"):
+            self.assertEqual(self.sf("track", f"{q} {other}")[0]["title"], "Save typed API key", q)
+        self.assertEqual(self.sf("track", "apikey not a key!")[0]["title"], "That doesn’t look like a Toggl Track API key")
+        # only the exact first word: anything else starts a timer
+        self.assertEqual(self.sf("track", "apikeys rotation")[0]["title"], "Start “apikeys rotation”")
+        self.assertEqual(self.sf("track", "rotate apikey")[0]["title"], "Start “rotate apikey”")
+        self.assertEqual(self.sf("track", "token refresh")[0]["title"], "Start “token refresh”")
+        # the same key typed and copied: only the clipboard row
+        self.assertEqual([i["title"] for i in self.sf("track", f"apikey {other}", FT_TEST_CLIPBOARD=other)][:2], ["Save API key from clipboard", "Remove the saved API key"])
+        # a short word or a URL on the clipboard isn't offered as a key
+        for clip in ("hello", "https://track.toggl.com/profile/abc123def456ghi789"):
+            self.assertNotIn("Save API key from clipboard", [i["title"] for i in self.sf("track", "apikey", FT_TEST_CLIPBOARD=clip)])
+        self.assertEqual(self.find(self.sf("track"), "API key")["autocomplete"], "apikey ")
+
+    def test_save_from_clipboard_clears_it(self):
+        other = "fedcba9876543210fedcba9876543210"
+        row = self.sf("track", "apikey", FT_TEST_CLIPBOARD=other)[0]
+        self.assertEqual(self.arg(row), {"a": "key-save", "source": "clipboard"})
+        self.assertEqual(self.act(row["arg"], FT_TEST_CLIPBOARD=other, **row["variables"]), "API key saved, but Toggl Track rejected it")
+        self.assertEqual(self.keychain()["toggl"], other)
+        self.assertIn(f"clear-clipboard:{len(other)}", self.effects())
+        # a typed key, or a clipboard that changed meanwhile, is left alone
+        os.remove(self.log)
+        self.assertEqual(self.act({"a": "key-save", "source": "typed"}, ft_new_key=TOGGL_TOKEN, FT_TEST_CLIPBOARD=TOGGL_TOKEN), "API key saved")
+        self.assertEqual(self.act({"a": "key-save", "source": "clipboard"}, ft_new_key=TOGGL_TOKEN, FT_TEST_CLIPBOARD="something else"), "API key saved")
+        self.assertFalse([e for e in self.effects() if e.startswith("clear-clipboard")])
+        # never from the arg
+        self.assertEqual(self.act({"a": "key-save", "source": "typed", "key": TOGGL_TOKEN}), "Couldn’t save the API key: it doesn’t look like a Toggl Track API key")
+
+    def test_remove_key(self):
+        it = self.sf("track", "apikey")
+        self.assertEqual(self.act(self.arg(self.find(it, "Remove the saved API key"))), "API key removed")
         self.assertNotIn("toggl", self.keychain())
+        self.assertEqual(self.act({"a": "key-remove"}), "Couldn’t remove the API key: none is saved")
+        self.assertEqual([i["title"] for i in self.sf("track", "apikey")], ["Get an API key…"])
+
+    def test_key_never_in_argv_or_stdout(self):
+        other = "fedcba9876543210fedcba9876543210"
+        out = self.run_js("track", "apikey", FT_TEST_CLIPBOARD=other)
+        self.assertEqual(out.count(other), 1)  # only inside the item's variables
+        for row in json.loads(out)["items"]:
+            self.assertNotIn(other, row.get("arg", ""))
+            self.assertNotIn(other, json.dumps(row.get("mods", {})))
+        msg = self.act(json.loads(out)["items"][0]["arg"], ft_new_key=other, FT_TEST_CLIPBOARD=other)
+        self.assertNotIn(other, msg)
+        self.assertNotIn(other, "\n".join(self.effects()))
 
     # --- audit pass 4 regressions ---
 
@@ -1326,10 +1390,10 @@ class TogglTests(TrackBase):
         self.act({"a": "open", "url": "https://track.toggl.com/profile"})
         self.assertIn("open:https://track.toggl.com/profile", self.effects())
         # the real Keychain item is off limits without FT_KEYCHAIN_FILE
-        self.assertEqual(self.act({"a": "token-set"}, FT_KEYCHAIN_FILE="", FT_TOKEN_INPUT=TOGGL_TOKEN),
-                         "Test mode: the real Keychain item is off limits.")
-        self.assertEqual(self.act({"a": "token-set"}, FT_KEYCHAIN_FILE=""), "")  # no dialog either
-        self.assertIn("dialog:token", self.effects())
+        self.assertEqual(self.act({"a": "key-save", "source": "typed"}, FT_KEYCHAIN_FILE="", ft_new_key=TOGGL_TOKEN),
+                         "Couldn’t save the API key: the Keychain refused it")
+        # and so is the real clipboard
+        self.assertNotIn("Save API key from clipboard", [i["title"] for i in self.sf("track", "apikey")])
 
     def test_session_end_does_not_wait_for_the_tracker(self):
         # The pomo Script Filter that notices the end must not block on Toggl (Alfred would kill it
@@ -1390,7 +1454,8 @@ class ClockifyTests(TrackBase):
 
     def test_auth_error(self):
         MOCK.force = (401, {"message": "Unauthorized"})
-        self.assertEqual(self.sf("track")[0]["title"], "Clockify rejected the API token")
+        self.assertEqual(self.sf("track")[0]["title"], "Clockify rejected your API key")
+        self.assertEqual(self.act({"a": "track-start", "description": "x", "tags": []}), "Clockify rejected your API key. Save a new one via “track apikey”.")
 
     def test_no_permission_to_create_tags(self):
         self.sf("track")
@@ -1406,7 +1471,7 @@ class ClockifyTests(TrackBase):
             msg = self.act(self.arg(self.sf("track", "Standup #brand_new")[0]))
         finally:
             Handler.clockify = orig
-        self.assertEqual(msg, "Clockify refused the request (403). Check your access to this workspace, or press ↩ to set a new token")
+        self.assertEqual(msg, "Clockify refused the request (403). Check your access to this workspace, or save a new API key via “track apikey”.")
 
 
 class KeychainTests(unittest.TestCase):
@@ -1420,17 +1485,18 @@ class KeychainTests(unittest.TestCase):
 
     def test_real_keychain_roundtrip(self):
         service = f"io.github.x-o-r-r-o.focus-timer.test-{os.getpid()}"
-        env = dict(os.environ, FT_KEYCHAIN_SERVICE=service, tracker="toggl", FT_TOGGL_URL=BASE + "/toggl", FT_TOKEN_INPUT=TOGGL_TOKEN,
+        env = dict(os.environ, FT_KEYCHAIN_SERVICE=service, tracker="toggl", FT_TOGGL_URL=BASE + "/toggl", ft_new_key=TOGGL_TOKEN,
                    alfred_workflow_data=self.tmp + "/d", alfred_workflow_cache=self.tmp + "/c")
         env.pop("FT_KEYCHAIN_FILE", None)
         try:
-            out = subprocess.run(["osascript", "-l", "JavaScript", "./focus.js", "action", '{"a":"token-set"}'], cwd=SRC, env=env,
+            out = subprocess.run(["osascript", "-l", "JavaScript", "./focus.js", "action", '{"a":"key-save","source":"typed"}'], cwd=SRC, env=env,
                                  capture_output=True, text=True, timeout=60)
-            self.assertIn("Connected to Toggl Track", out.stdout, out.stderr)
+            self.assertEqual(out.stdout.strip(), "API key saved", out.stderr)
             got = subprocess.run(["security", "find-generic-password", "-s", service, "-a", "toggl", "-w"], capture_output=True, text=True)
             self.assertEqual(got.stdout.strip(), TOGGL_TOKEN)
-            out = subprocess.run(["osascript", "-l", "JavaScript", "./focus.js", "action", '{"a":"token-remove"}'], cwd=SRC, env=env,
+            out = subprocess.run(["osascript", "-l", "JavaScript", "./focus.js", "action", '{"a":"key-remove"}'], cwd=SRC, env=env,
                                  capture_output=True, text=True, timeout=60)
+            self.assertEqual(out.stdout.strip(), "API key removed", out.stderr)
             gone = subprocess.run(["security", "find-generic-password", "-s", service, "-a", "toggl"], capture_output=True)
             self.assertNotEqual(gone.returncode, 0)
         finally:
@@ -1444,8 +1510,8 @@ class KeychainTests(unittest.TestCase):
         env.pop("FT_KEYCHAIN_FILE", None)
 
         def token_set(tok, **extra):
-            return subprocess.run(["osascript", "-l", "JavaScript", "./focus.js", "action", '{"a":"token-set"}'], cwd=SRC,
-                                  env=dict(env, FT_TOKEN_INPUT=tok, **extra), capture_output=True, text=True, timeout=60).stdout
+            return subprocess.run(["osascript", "-l", "JavaScript", "./focus.js", "action", '{"a":"key-save","source":"typed"}'], cwd=SRC,
+                                  env=dict(env, ft_new_key=tok, **extra), capture_output=True, text=True, timeout=60).stdout
 
         def exists(svc, acct):
             return subprocess.run(["security", "find-generic-password", "-s", svc, "-a", acct], capture_output=True).returncode == 0
@@ -1453,12 +1519,12 @@ class KeychainTests(unittest.TestCase):
             evil = [f'abcdefgh" \nadd-generic-password -s "{victim}" -a x -w "pwned', 'abc def ghij', 'abcdefgh\\" -a other',
                     "abcdefgh'quote", 'abcdefgh\\', 'a' * 300, "abcdefgh\tij"]
             for tok in evil:
-                self.assertIn("doesn't look like", token_set(tok), tok)
+                self.assertIn("doesn’t look like", token_set(tok), tok)
             self.assertFalse(exists(victim, "x"))
             self.assertFalse(exists(service, "clockify"))
-            self.assertIn("doesn't look like", token_set("abcdefghij", FT_KEYCHAIN_SERVICE=f'{service}" -a y'))
+            self.assertIn("the Keychain refused it", token_set("abcdefghij", FT_KEYCHAIN_SERVICE=f'{service}" -a y'))
             # every character a real token may have survives the round trip
-            self.assertIn("Connected to Clockify", token_set(CLOCKIFY_TOKEN))
+            self.assertEqual(token_set(CLOCKIFY_TOKEN).strip(), "API key saved")
             for tok in ("Ab+/=:._-09xyzXYZ", "ZmFrZS1rZXk+/w=="):
                 token_set(tok)
                 got = subprocess.run(["security", "find-generic-password", "-s", service, "-a", "clockify", "-w"], capture_output=True, text=True)
