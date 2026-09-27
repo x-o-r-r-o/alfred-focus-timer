@@ -757,7 +757,11 @@ class WaiterTests(Base):
     def waiters(self):
         # Only the waiter itself: not the short-lived spawning shell (or its fork before exec),
         # whose command line also names waiter.sh and the data folder.
-        return subprocess.run(["pgrep", "-f", f"^/bin/bash /.*waiter\\.sh [0-9a-f]{{20}} {self.data}$"], capture_output=True, text=True).stdout.split()
+        pids = subprocess.run(["pgrep", "-f", f"^/bin/bash /.*waiter\\.sh [0-9a-f]{{20}} {self.data}$"], capture_output=True, text=True).stdout.split()
+        # A waiter forks briefly before each `sleep`; the child shows the same command line until it
+        # execs. Count only processes whose parent isn't a waiter (a busy machine made this flaky).
+        parents = {p: subprocess.run(["ps", "-o", "ppid=", "-p", p], capture_output=True, text=True).stdout.strip() for p in pids}
+        return [p for p in pids if parents[p] not in pids]
 
     def test_waiter_fires_and_exits(self):
         self.act({"a": "start", "kind": "focus", "secs": 2, "label": "Quick", "expect": ""})
