@@ -1056,7 +1056,7 @@ class TogglTests(TrackBase):
         self.sf("track", now=T0 + 20)  # after the pause that follows a failed request
         MOCK.force = (403, {"message": "No access"})
         it = self.sf("track", now=T0 + 3600)  # stale entries, /me still cached
-        self.assertEqual(it[0]["title"], "Toggl Track refused the request (403)")
+        self.assertEqual(it[0]["title"], "Toggl Track refused the request (HTTP 403)")
         self.assertEqual(it[0]["autocomplete"], "apikey ")
 
     def test_cmd_warns_about_replacing_a_pomodoro(self):
@@ -1086,7 +1086,7 @@ class TogglTests(TrackBase):
         self.assertTrue(self.wait_for(lambda: not os.path.exists(os.path.join(self.data, "refresh.lock")), 5))
         n = len(MOCK.requests)
         data = self.sf("track", now=T0 + 3601, full=True, **env)
-        self.assertEqual(data["items"][0]["title"], "Too many requests to Toggl Track")
+        self.assertEqual(data["items"][0]["title"], "Toggl Track is limiting requests")
         self.assertNotIn("rerun", data)
         time.sleep(1)
         self.assertEqual(len(MOCK.requests), n)
@@ -1105,9 +1105,9 @@ class TogglTests(TrackBase):
         self.assertEqual(it[0]["title"], "Start @ Café Opening")
 
     def test_errors(self):
-        for status, body, title in [(401, "", "Toggl Track rejected your API key"), (402, "Requires a paid plan", "Toggl Track error 402"),
-                                    (429, "", "Too many requests to Toggl Track"), (500, "", "Toggl Track is having problems (500)"),
-                                    (400, "Invalid project_id", "Toggl Track error 400")]:
+        for status, body, title in [(401, "", "Toggl Track rejected your API key"), (402, "Requires a paid plan", "Toggl Track returned an error (HTTP 402)"),
+                                    (429, "", "Toggl Track is limiting requests"), (500, "", "Toggl Track returned an error (HTTP 500)"),
+                                    (400, "Invalid project_id", "Toggl Track returned an error (HTTP 400)")]:
             MOCK.reset()
             shutil.rmtree(self.cache, ignore_errors=True)
             MOCK.force = (status, body)
@@ -1122,15 +1122,25 @@ class TogglTests(TrackBase):
                 self.assertEqual(it[0]["subtitle"], "Invalid project_id")
         shutil.rmtree(self.cache, ignore_errors=True)
         it = self.sf("track", FT_TOGGL_URL="http://127.0.0.1:9/api")
-        self.assertEqual(it[0]["title"], "Can't reach Toggl Track")
+        self.assertEqual(it[0]["title"], "Can’t reach Toggl Track")
+        self.assertEqual(it[0]["subtitle"], "Check your internet connection · ↩ Try again")
+        self.assertEqual(it[0]["icon"]["path"], "icons/offline.png")
         msg = self.act({"a": "track-start", "description": "x", "tags": []}, FT_TOGGL_URL="http://127.0.0.1:9/api")
-        self.assertEqual(msg, "Can't reach Toggl Track. Check your internet connection")
+        self.assertEqual(msg, "Couldn’t start the timer: Can’t reach Toggl Track. Check your internet connection")
+
+    def test_offline_row_over_saved_entries(self):
+        self.sf("track")
+        it = self.sf("track", now=T0 + 600, FT_TOGGL_URL="http://127.0.0.1:9/api", FT_ENTRY_TTL="0")
+        self.assertEqual(it[0]["title"], "Offline: showing results from 10 min ago")
+        self.assertEqual(it[0]["subtitle"], "Check your internet connection · ↩ Try again")
+        self.assertEqual(it[0]["icon"]["path"], "icons/offline.png")
+        self.assertIn("Writing docs", [i["title"] for i in it])
 
     def test_stale_cache_with_failing_refresh(self):
         self.sf("track")
         MOCK.force = (429, "")
         it = self.sf("track", now=T0 + 3600)
-        self.assertEqual(it[0]["title"], "Too many requests to Toggl Track")
+        self.assertEqual(it[0]["title"], "Toggl Track is limiting requests")
         self.assertIn("Writing docs", [i["title"] for i in it])
 
     def test_background_refresh(self):
@@ -1199,7 +1209,7 @@ class TogglTests(TrackBase):
     def test_link_tracker_offline(self):
         msg = self.start(link_tracker="1", FT_TOGGL_URL="http://127.0.0.1:9/api")
         self.assertIn("Focus started", msg)
-        self.assertIn("Toggl: Can't reach Toggl Track.", msg)
+        self.assertIn("Couldn’t start the Toggl timer: Can’t reach Toggl Track.", msg)
         self.assertEqual(self.state()["status"], "running")
 
     def test_report(self):
@@ -1218,7 +1228,7 @@ class TogglTests(TrackBase):
         self.assertEqual(it[2]["subtitle"], "This week · Today: 1 h")
         self.assertEqual(self.find(self.sf("track"), "Report")["autocomplete"], "report")
         it = self.sf("track", "report", FT_TOGGL_URL="http://127.0.0.1:9/api", FT_ENTRY_TTL="0")  # offline: the saved entries
-        self.assertEqual([i["title"] for i in it[:2]], ["Can't reach Toggl Track", "Today: 1 h 10 min tracked"])
+        self.assertEqual([i["title"] for i in it[:2]], ["Offline: showing results from less than a minute ago", "Today: 1 h 10 min tracked"])
 
     def test_default_project(self):
         it = self.sf("track", "Standup", default_project=" website red ")
@@ -1309,15 +1319,15 @@ class TogglTests(TrackBase):
         self.sf("track")
         MOCK.force = (402, "You have hit your hourly limit for API calls.", {"X-Toggl-Quota-Remaining": "0", "X-Toggl-Quota-Resets-In": "1200"})
         it = self.sf("track", now=T0 + 3600)  # stale cache: refresh in the foreground (FT_NO_BACKGROUND)
-        self.assertEqual(it[0]["title"], "Toggl Track API limit reached")
+        self.assertEqual(it[0]["title"], "Toggl Track is limiting requests")
         self.assertIn("Try again in 20 min", it[0]["subtitle"])
         self.assertIn("Writing docs", [i["title"] for i in it])
         n = len(MOCK.requests)
         for dt in (1, 5, 600):
             it = self.sf("track", "some words", now=T0 + 3600 + dt)
-            self.assertEqual(it[0]["title"], "Toggl Track API limit reached")
+            self.assertEqual(it[0]["title"], "Toggl Track is limiting requests")
         self.assertIn("Try again in 10 min", it[0]["subtitle"])
-        self.assertIn("API limit", self.act({"a": "track-start", "description": "x", "tags": []}, T0 + 3700))
+        self.assertIn("limiting requests", self.act({"a": "track-start", "description": "x", "tags": []}, T0 + 3700))
         self.assertEqual(len(MOCK.requests), n)  # nothing went out while blocked
         MOCK.force = None
         self.assertEqual(self.sf("track", now=T0 + 3600 + 1201)[0]["title"], "Nothing is being tracked")
@@ -1365,11 +1375,11 @@ class TogglTests(TrackBase):
         shutil.rmtree(self.cache, ignore_errors=True)
         MOCK.force = (500, "")
         it = self.sf("track")
-        self.assertEqual(it[0]["title"], "Toggl Track is having problems (500)")
+        self.assertEqual(it[0]["title"], "Toggl Track returned an error (HTTP 500)")
         self.assertEqual(self.arg(it[0]), {"a": "track-refresh"})  # ↩ tries again
         n = len(MOCK.requests)
         for dt, q in ((1, "w"), (2, "wr"), (5, "wri")):
-            self.assertEqual(self.sf("track", q, now=T0 + dt)[0]["title"], "Toggl Track is having problems (500)")
+            self.assertEqual(self.sf("track", q, now=T0 + dt)[0]["title"], "Toggl Track returned an error (HTTP 500)")
         self.assertEqual(len(MOCK.requests), n)
         MOCK.force = None
         self.assertEqual(self.sf("track", now=T0 + 16)[0]["title"], "Nothing is being tracked")
@@ -1379,14 +1389,14 @@ class TogglTests(TrackBase):
         MOCK.force = (429, "", {"Retry-After": "600"})
         self.sf("track", now=T0 + 3600)
         n = len(MOCK.requests)
-        self.assertIn("Too many requests", self.act({"a": "track-refresh"}, T0 + 3601))
+        self.assertIn("Couldn’t refresh: Toggl Track is limiting requests", self.act({"a": "track-refresh"}, T0 + 3601))
         self.assertEqual(len(MOCK.requests), n)
 
     def test_test_mode_never_reaches_real_services(self):
         env = {"FT_TOGGL_URL": "", "FT_CLOCKIFY_URL": ""}
         shutil.rmtree(self.cache, ignore_errors=True)
-        self.assertEqual(self.sf("track", **env)[0]["title"], "Can't reach Toggl Track")
-        self.assertEqual(self.sf("track", tracker="clockify", **env)[0]["title"], "Can't reach Clockify")
+        self.assertEqual(self.sf("track", **env)[0]["title"], "Can’t reach Toggl Track")
+        self.assertEqual(self.sf("track", tracker="clockify", **env)[0]["title"], "Can’t reach Clockify")
         self.act({"a": "open", "url": "https://track.toggl.com/profile"})
         self.assertIn("open:https://track.toggl.com/profile", self.effects())
         # the real Keychain item is off limits without FT_KEYCHAIN_FILE
@@ -1471,7 +1481,7 @@ class ClockifyTests(TrackBase):
             msg = self.act(self.arg(self.sf("track", "Standup #brand_new")[0]))
         finally:
             Handler.clockify = orig
-        self.assertEqual(msg, "Clockify refused the request (403). Check your access to this workspace, or save a new API key via “track apikey”.")
+        self.assertEqual(msg, "Clockify refused the request (HTTP 403). Check your access to this workspace, or save a new API key via “track apikey”.")
 
 
 class KeychainTests(unittest.TestCase):

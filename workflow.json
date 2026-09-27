@@ -278,7 +278,7 @@
       "type": "textfield",
       "variable": "default_project",
       "label": "Default project",
-      "description": "Used for new timers when you don't type an @project, including Pomodoro tracking",
+      "description": "Used for new timers when you don’t type an @project, including Pomodoro tracking",
       "config": {
         "default": "",
         "placeholder": "Project name",

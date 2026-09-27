@@ -640,7 +640,7 @@ function pomoAction(a) {
       case "extend": {
         const add = Math.max(1, Math.round(Number(a.secs) || 300));
         if (s.secs + add > MAX_SECS) {
-          msg = "A session can't be longer than 24 hours.";
+          msg = "A session can’t be longer than 24 hours.";
           return;
         }
         s.secs += add;
@@ -974,32 +974,33 @@ function http(method, url, headers, body) {
 function checkResponse(prov, r, path) {
   const n = prov.name;
   if (r.status === 0) {
-    if (r.curl === 28) throw new ApiError(`${n} didn't respond in time`, "Check your connection and try again", "network");
-    throw new ApiError(`Can't reach ${n}`, "Check your internet connection", "network");
+    if (r.curl === 28) throw new ApiError(`${n} didn’t respond in time`, "Check your internet connection", "network");
+    throw new ApiError(`Can’t reach ${n}`, "Check your internet connection", "network");
   }
   if (r.status >= 200 && r.status < 300) return r.json;
   // A bad token is a 401 (Clockify) or a 403 (Toggl). Any other 403 is a permission problem, such
   // as a workspace where you can't create tags, so it isn't reported as a bad token.
   if (r.status === 401 || (r.status === 403 && /^\/(me|user)$/.test(path || ""))) throw Object.assign(new ApiError(`${n} rejected your API key`, `Save a new one via “${keyCommand()}”`, "auth", r.status), { badKey: true });
-  if (r.status === 403) throw new ApiError(`${n} refused the request (403)`, `Check your access to this workspace, or save a new API key via “${keyCommand()}”`, "auth", r.status);
+  if (r.status === 403) throw new ApiError(`${n} refused the request (HTTP 403)`, `Check your access to this workspace, or save a new API key via “${keyCommand()}”`, "auth", r.status);
   // Toggl answers 402 when the hourly quota of your plan is used up (30 requests on the free plan),
   // with the seconds until it resets in a header. A 402 without quota headers is a paid feature.
   const h = r.headers || {};
   const resets = parseInt(h["x-toggl-quota-resets-in"], 10);
   if (r.status === 402 && (isFinite(resets) || h["x-toggl-quota-remaining"] !== undefined)) {
     const wait = isFinite(resets) && resets > 0 ? Math.min(resets, 3600) : 600;
-    throw new ApiError(`${n} API limit reached`, `Your Toggl plan allows a set number of requests per hour. Try again in ${fmtDur(Math.max(60, wait))}.`, "quota", 402, wait);
+    throw new ApiError(`${n} is limiting requests`, `Your Toggl plan allows a set number of requests per hour · Try again in ${fmtDur(Math.max(60, wait))}`, "quota", 402, wait);
   }
   if (r.status === 429) {
     const ra = parseInt(h["retry-after"], 10);
-    throw new ApiError(`Too many requests to ${n}`, "Wait a minute and try again", "quota", 429, isFinite(ra) && ra > 0 ? Math.min(ra, 3600) : ERROR_BACKOFF);
+    const wait = isFinite(ra) && ra > 0 ? Math.min(ra, 3600) : ERROR_BACKOFF;
+    throw new ApiError(`${n} is limiting requests`, `Try again in ${wait > 90 ? fmtDur(wait) : "a minute"}`, "quota", 429, wait);
   }
-  if (r.status >= 500) throw new ApiError(`${n} is having problems (${r.status})`, "Try again later", "api", r.status);
+  if (r.status >= 500) throw new ApiError(`${n} returned an error (HTTP ${r.status})`, "Try again later", "api", r.status);
   let detail = "";
   if (r.json && typeof r.json === "object") detail = r.json.message || r.json.error || "";
   else if (typeof r.json === "string") detail = r.json;
   else detail = r.text || "";
-  throw new ApiError(`${n} error ${r.status}`, oneLine(detail, 120), "api", r.status);
+  throw new ApiError(`${n} returned an error (HTTP ${r.status})`, oneLine(detail, 120), "api", r.status);
 }
 
 // Keychain: service = bundle id, account = provider. FT_KEYCHAIN_FILE (tests only) swaps in a file.
@@ -1058,12 +1059,12 @@ function call(ctx, method, path, body) {
   if (gate) {
     const f = cacheRead(ctx, "fail");
     if (f && f.v && typeof f.v === "object" && now() < f.t + FAIL_WAIT && now() >= f.t) {
-      throw new ApiError(String(f.v.title || `Can't reach ${ctx.prov.name}`), String(f.v.subtitle || ""), String(f.v.kind || "network"), Number(f.v.status) || 0);
+      throw new ApiError(String(f.v.title || `Can’t reach ${ctx.prov.name}`), String(f.v.subtitle || ""), String(f.v.kind || "network"), Number(f.v.status) || 0);
     }
   }
   const q = cacheRead(ctx, "quota");
   if (q && q.v && typeof q.v.wait === "number" && now() < q.t + q.v.wait && now() >= q.t) {
-    throw new ApiError(String(q.v.title || `${ctx.prov.name} API limit reached`), String(q.v.subtitle || "").replace(/Try again in .*$/, `Try again in ${fmtDur(Math.max(60, q.t + q.v.wait - now()))}.`), "quota", q.v.status);
+    throw new ApiError(String(q.v.title || `${ctx.prov.name} is limiting requests`), String(q.v.subtitle || "").replace(/Try again in .*$/, `Try again in ${fmtDur(Math.max(60, q.t + q.v.wait - now()))}`), "quota", q.v.status);
   }
   try {
     return checkResponse(ctx.prov, http(method, ctx.prov.base() + path, ctx.prov.headers(ctx.token), body), path.split("?")[0]);
@@ -1377,9 +1378,20 @@ function entryLine(e) {
 // Offline or a server error: ↩ tries again at once (the Script Filter pauses failed requests).
 const retryable = (e) => e.kind === "network" || e.status >= 500;
 
-function errorItems(prov, e) {
+// "5 min ago", for the row above entries shown from the cache while offline
+function fmtAgo(secs) {
+  return secs < 60 ? "less than a minute ago" : `${fmtDur(secs)} ago`;
+}
+function offlineItem(age) {
+  const title = typeof age === "number" && age >= 0 ? `Offline: showing results from ${fmtAgo(age)}` : "Offline: showing saved results";
+  return item(title, "Check your internet connection · ↩ Try again", "offline", { a: "track-refresh" });
+}
+
+// age: seconds since the saved entries shown below were fetched (none are shown when omitted)
+function errorItems(prov, e, age) {
   if (e.kind === "auth" || e.kind === "token") return setKeyItems(prov, e);
-  if (retryable(e)) return [item(e.message, `${e.subtitle} · ↩ Try again`, "error", { a: "track-refresh" })];
+  if (e.kind === "network" && age !== undefined) return [offlineItem(age)];
+  if (retryable(e)) return [item(e.message, `${e.subtitle} · ↩ Try again`, e.kind === "network" ? "offline" : "error", { a: "track-refresh" })];
   return [item(e.message, e.subtitle, "error")];
 }
 
@@ -1501,8 +1513,8 @@ function trackItems(query) {
     projects = cached(ctx, `projects-${ctx.ws}`, DAY, () => prov.projects(ctx));
   } catch (e) {
     if (!(e instanceof ApiError)) throw e;
-    items.push(...errorItems(prov, e));
     const c = savedEntries(ctx);
+    items.push(...errorItems(prov, e, c ? now() - c.t : undefined));
     if (!c) return output(items);
     entries = c.v;
     const pc = cacheRead(ctx, `projects-${ctx.ws}`);
@@ -1520,7 +1532,8 @@ function trackItems(query) {
   if (bgError && isObj(bgError.v) && !items.length) {
     const be = bgError.v, auth = be.kind === "auth";
     const retry = !auth && retryable({ kind: be.kind, status: Number(be.status) || 0 });
-    items.push(item(String(be.title || "Couldn't refresh"), `Showing saved entries · ${String(be.subtitle || "")}${retry ? " · ↩ Try again" : ""}`,
+    if (be.kind === "network") items.push(offlineItem(age));
+    else items.push(item(String(be.title || "Couldn’t refresh"), `Showing saved entries · ${String(be.subtitle || "")}${retry ? " · ↩ Try again" : ""}`,
       "error", retry ? { a: "track-refresh" } : null, auth ? { autocomplete: "apikey " } : {}));
   }
 
@@ -1556,7 +1569,7 @@ function trackItems(query) {
       const it = runningItem();
       it.subtitle = it.subtitle.replace(" · ↩ Stop", ` · ${todayNote} · ↩ Stop`);
       items.push(it);
-    } else items.push(item("Nothing is being tracked", `${todayNote} · Type what you're working on: writing docs @project #tag`, "info"));
+    } else items.push(item("Nothing is being tracked", `${todayNote} · Type what you’re working on: writing docs @project #tag`, "info"));
     const seen = new Set();
     for (const e of entries) {
       if (e.running || String(e.ws) !== String(ctx.ws)) continue;
@@ -1623,7 +1636,7 @@ function reportItems(ctx) {
     // offline or refused: report from the saved entries, below the error
     const c = savedEntries(ctx);
     if (!(e instanceof ApiError) || !c) throw e;
-    head = errorItems(ctx.prov, e);
+    head = errorItems(ctx.prov, e, now() - c.t);
     r = { entries: c.v };
   }
   const t = now(), today = dayKey(t), week = weekStartKey(t);
@@ -1768,7 +1781,8 @@ function trackAction(a) {
     }
   } catch (e) {
     if (!(e instanceof ApiError)) throw e;
-    return keyErrorNote(prov, e) || `${e.message}. ${e.subtitle}`.trim();
+    const verb = { "track-refresh": "refresh", "track-stop": "stop the timer", "track-start": "start the timer" }[a.a] || "do that";
+    return keyErrorNote(prov, e) || `Couldn’t ${verb}: ${e.message}. ${e.subtitle}`.trim();
   }
   return "";
 }
@@ -1803,7 +1817,7 @@ function trackerStartForFocus(f) {
     return owned ? `Tracking in ${prov.short}.` : "";
   } catch (e) {
     if (!(e instanceof ApiError)) throw e;
-    return keyErrorNote(prov, e) || `${prov.short}: ${e.message}.`;
+    return keyErrorNote(prov, e) || `Couldn’t start the ${prov.short} timer: ${e.message}.`;
   }
 }
 
@@ -1818,7 +1832,7 @@ function trackerStopOwned(track) {
     return stopped ? `Stopped the ${prov.short} timer.` : "";
   } catch (e) {
     if (!(e instanceof ApiError)) throw e;
-    return keyErrorNote(prov, e) || `${prov.short}: ${e.message}.`;
+    return keyErrorNote(prov, e) || `Couldn’t stop the ${prov.short} timer: ${e.message}.`;
   }
 }
 

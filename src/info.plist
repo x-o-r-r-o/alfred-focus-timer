@@ -899,7 +899,7 @@ Every keyword can be changed in the Workflow’s Configuration.
 				<true/>
 			</dict>
 			<key>description</key>
-			<string>Used for new timers when you don't type an @project, including Pomodoro tracking</string>
+			<string>Used for new timers when you don’t type an @project, including Pomodoro tracking</string>
 			<key>label</key>
 			<string>Default project</string>
 			<key>type</key>

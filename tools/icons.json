@@ -20,5 +20,6 @@
   "key-remove": ["trash.fill", "#DC2626"],
   "key-get": ["arrow.up.forward.square.fill", "#2563EB"],
   "info": ["info.circle.fill", "#64748B"],
-  "error": ["exclamationmark.triangle.fill", "#DC2626"]
+  "error": ["exclamationmark.triangle.fill", "#DC2626"],
+  "offline": ["wifi.slash", "#D97706"]
 }
