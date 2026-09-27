@@ -257,7 +257,11 @@ function openURL(args) {
 
 function alfredTrigger(trigger, argument) {
   if (testLog(`trigger:${trigger}:${argument}`)) return;
+  // Found in real Alfred: when Alfred isn't running (quit mid-session), the trigger launches it but
+  // is sometimes lost while Alfred loads its workflows. Launch it first and give it a moment.
+  const wake = Application(ALFRED).running() ? [] : ["/bin/bash", "-c", '/usr/bin/open -g -b "$0"; /bin/sleep 3; exec "$@"', ALFRED];
   spawnDetached([
+    ...wake,
     "/usr/bin/osascript",
     "-e", "on run argv",
     "-e", `tell application id "${ALFRED}" to run trigger (item 1 of argv) in workflow (item 2 of argv) with argument (item 3 of argv)`,
@@ -321,7 +325,19 @@ function cleanDeep(v, key) {
   }
   return v;
 }
+// Rows need a uid for Alfred to keep the selected row while the Script Filter reruns (rerun):
+// without one the selection jumps back to the first row on every rerun (found in real Alfred).
+// The uid is the position plus the title with its numbers masked, so countdowns, prices and clocks
+// keep it, while typing something new changes it and the selection resets to the top as usual.
+function stableUids(items) {
+  items.forEach((it, i) => {
+    if (it && !it.uid) it.uid = `${i}|${String(it.title || "").replace(/[0-9]+/g, "#")}`;
+  });
+  return items;
+}
+
 function output(items, extra = {}) {
+  stableUids(items);
   return JSON.stringify(cleanDeep(Object.assign({ skipknowledge: true, items }, extra)));
 }
 

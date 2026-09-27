@@ -340,6 +340,15 @@ class PomodoroTests(Base):
         self.assertEqual(self.arg(head, "alt")["a"], "skip")
         self.assertEqual(self.find(data["items"], "Skip to")["title"], "Skip to Short Break")
 
+    def test_rows_keep_their_uid_between_reruns(self):
+        # Found in real Alfred: without uids the selection jumped back to "Pause" every second,
+        # so ↩ on "Stop" or "Add 5 Minutes" paused the session instead
+        self.start()
+        uids = lambda now: [i["uid"] for i in self.sf("pomo", now=now, full=True)["items"]]
+        a, b = uids(T0 + 60), uids(T0 + 61)
+        self.assertEqual(a, b)
+        self.assertEqual(len(set(a)), len(a))
+
     def test_double_start_is_refused(self):
         stale = {"a": "start", "kind": "focus", "secs": 1500, "label": "", "expect": ""}
         self.act(stale)
